@@ -1,10 +1,11 @@
-# ⚡ VERSION MINIMALE POUR HUGGING FACE INFERENCE API
-# Uniquement les packages nécessaires pour Hugging Face (LLM externe)
+# ⚡ VERSION OPTIMISÉE POUR HUGGING FACE INFERENCE API
+# Utilise uniquement les packages nécessaires, avec versions spécifiques pour éviter le backtracking
 
 # Core llama-index
 llama-index-core>=0.10.0
 
 # Hugging Face LLM (obligatoire pour l'API externe)
+# Note: HuggingFaceInferenceAPI n'a PAS besoin de torch localement (appels HTTP uniquement)
 llama-index-llms-huggingface>=0.1.0
 
 # Embeddings et vector store
@@ -15,7 +16,10 @@ llama-index-readers-file>=0.1.0
 # ChromaDB - version avec wheels précompilés
 chromadb>=0.4.22,<0.5.0
 
-# Tokenizers - version spécifique avec wheels précompilés pour éviter la compilation Rust
+# NumPy - version avec wheels précompilés (évite la compilation)
+numpy>=1.24.0,<2.0.0
+
+# Tokenizers - version spécifique avec wheels précompilés
 tokenizers==0.15.2
 
 # Embeddings et lecture PDF
@@ -30,9 +34,7 @@ uvicorn[standard]>=0.32.0
 # Hugging Face Hub (nécessaire pour l'Inference API)
 huggingface-hub>=0.20.0
 
-# NOTE: Packages exclus (non nécessaires pour Hugging Face uniquement) :
-# - llama-cpp-python : Compilation très longue, modèle local uniquement
-# - llama-index-llms-llama-cpp : Dépend de llama-cpp-python
-# - llama-index-llms-openai : Si vous voulez utiliser OpenAI plus tard, ajoutez-le
-# - llama-index-llms-anthropic : Si vous voulez utiliser Claude plus tard, ajoutez-le
-# - llama-index-llms-ollama : Si vous voulez utiliser Ollama plus tard, ajoutez-le
+# NOTE IMPORTANTE :
+# - llama-index-llms-huggingface installe torch/transformers même si non nécessaires pour Inference API
+# - C'est une limitation du package, mais HuggingFaceInferenceAPI n'utilise pas torch (appels HTTP)
+# - Pour vraiment éviter torch, il faudrait utiliser directement l'API Hugging Face sans llama-index
