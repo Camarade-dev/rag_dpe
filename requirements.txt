@@ -1,0 +1,32 @@
+--extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+
+# ⚡ VERSION OPTIMISÉE - Installe uniquement les packages nécessaires
+# Pas de meta-package "llama-index" pour éviter les conflits de dépendances
+
+# Core llama-index (sans les dépendances optionnelles)
+llama-index-core>=0.10.0
+
+# Packages spécifiques utilisés dans le code
+llama-index-llms-llama-cpp>=0.1.0  # Pour modèle local (optionnel si LLM externe utilisé)
+llama-index-llms-openai>=0.1.0  # Pour OpenAI API
+llama-index-llms-anthropic>=0.1.0  # Pour Anthropic Claude API
+llama-index-llms-huggingface>=0.1.0  # Pour Hugging Face Inference API
+llama-index-llms-ollama>=0.1.0  # Pour Ollama
+llama-index-embeddings-huggingface>=0.1.0
+llama-index-vector-stores-chroma>=0.1.0
+llama-index-readers-file>=0.1.0
+
+# llama-cpp-python (version compatible avec llama-index-llms-llama-cpp) - Optionnel si LLM externe
+llama-cpp-python>=0.2.32,<0.3.0
+
+# ChromaDB - version avec wheels précompilés pour Windows
+chromadb>=0.4.0,<0.5.0
+
+# Embeddings et lecture PDF
+sentence-transformers
+pypdf
+pymupdf
+
+# API FastAPI
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0

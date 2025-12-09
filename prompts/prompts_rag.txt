@@ -1,0 +1,17 @@
+=== LOGEMENT ID 0 | DPE ACTUEL : G ===
+PROMPT RAG GÉNÉRÉ :
+"Agis en tant qu'expert en rénovation énergétique.
+Je possède un logement classé G dans le département 59 (Année 1950, 110.0m²).
+
+MES DONNÉES TECHNIQUES (Benchmarks) :
+- Isolation (Ubat) : 2.04 W/m².K (Score: 2/100)
+- Conso Chauffage : 336 kWhEP/m² (Score: 14/100)
+- Emissions CO2 Chauffage : 107 kgCO2/m² (Score: 2/100)
+
+DIAGNOSTIC :
+L'analyse automatique détecte une faiblesse critique sur : l'Isolation globale (Enveloppe), le système de Chauffage (trop consommateur), l'Energie du Chauffage (trop carbonée).
+
+TACHE :
+1. Explique succinctement pourquoi mon score G est limitant.
+2. Propose 3 scénarios de travaux pour traiter spécifiquement l'Isolation globale (Enveloppe), le système de Chauffage (trop consommateur), l'Energie du Chauffage (trop carbonée) et viser la classe B.
+3. Liste les aides financières actuelles dans le 59."

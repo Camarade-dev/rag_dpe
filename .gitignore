@@ -1,0 +1,36 @@
+# Modèles LLM (trop volumineux pour Git)
+data/llm_models/*.gguf
+data/llm_models/*.bin
+
+# Base de données ChromaDB
+data/chroma_db/
+
+# Cache Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Environnements virtuels
+venv/
+env/
+ENV/
+
+# Outputs
+outputs/*.txt
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+
+
+
+
