@@ -19,8 +19,12 @@ llama-index-readers-file>=0.1.0
 # llama-cpp-python (version compatible avec llama-index-llms-llama-cpp) - Optionnel si LLM externe
 llama-cpp-python>=0.2.32,<0.3.0
 
-# ChromaDB - version avec wheels précompilés pour Windows
-chromadb>=0.4.0,<0.5.0
+# ChromaDB - version avec wheels précompilés
+chromadb>=0.4.22,<0.5.0
+
+# Tokenizers - version spécifique avec wheels précompilés pour éviter la compilation Rust
+# Utiliser une version qui a des wheels pour toutes les plateformes
+tokenizers==0.15.2
 
 # Embeddings et lecture PDF
 sentence-transformers
