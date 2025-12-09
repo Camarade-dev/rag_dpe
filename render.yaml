@@ -1,0 +1,61 @@
+# render.yaml - Configuration pour déploiement sur Render
+# Placez ce fichier à la racine de chaque repository
+
+services:
+  # Backend Node.js
+  - type: web
+    name: dpe-backend
+    env: node
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: MONGO_URI
+        sync: false  # À configurer manuellement dans Render
+      - key: JWT_SECRET
+        sync: false
+      - key: COOKIE_NAME
+        value: auth_token
+      - key: CORS_ORIGIN
+        sync: false
+      - key: PYTHON_API_URL
+        value: https://greendiag-site-vercel.onrender.com
+      - key: RAG_API_URL
+        sync: false
+
+  # API Python DPE
+  - type: web
+    name: dpe-api
+    env: python
+    buildCommand: cd DPE_IA_ia/DPE_IA && pip install -r requirements_api.txt
+    startCommand: cd DPE_IA_ia/DPE_IA && uvicorn api_dpe:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.0  # Utiliser Python 3.12 pour cohérence
+      - key: PORT
+        value: 8001
+
+  # API Python RAG
+  - type: web
+    name: rag-api
+    env: python
+    buildCommand: pip install --upgrade pip setuptools wheel && pip install --no-cache-dir --prefer-binary -r requirements.txt
+    startCommand: uvicorn src.api.main_api:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.0  # Utiliser Python 3.12 au lieu de 3.13 pour éviter les problèmes de compilation
+      - key: PORT
+        value: 8002
+      - key: CHROMA_DB_PATH
+        value: /tmp/chroma_db
+      - key: LLM_PROVIDER
+        value: huggingface  # Utilise Hugging Face (gratuit) au lieu d'OpenAI
+      - key: HUGGINGFACE_API_KEY
+        sync: false  # À configurer manuellement dans Render
+      - key: HUGGINGFACE_MODEL
+        value: mistralai/Mixtral-8x7B-Instruct-v0.1
+
+
