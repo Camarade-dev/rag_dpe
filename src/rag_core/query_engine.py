@@ -81,7 +81,7 @@ class RenovationRAG:
     def _init_llm(self):
         """Charge le LLM (externe ou local selon la configuration)"""
         provider = LLM_PROVIDER
-        
+         
         if provider == "openai":
             if OpenAI is None:
                 raise ImportError("❌ Package llama-index-llms-openai non installé. Installez-le avec: pip install llama-index-llms-openai")

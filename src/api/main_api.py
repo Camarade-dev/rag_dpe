@@ -56,7 +56,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 DOCS_PATH = os.path.join(BASE_DIR, "docs")
 print(f"📂 Chemin docs calculé : {DOCS_PATH}")
 print(f"📂 Chemin docs existe : {os.path.exists(DOCS_PATH)}")
-
+ 
 # Endpoint pour chercher et servir un PDF par son nom (cherche dans tous les sous-dossiers)
 @app.get("/docs/{file_name:path}")
 async def get_pdf(file_name: str):
