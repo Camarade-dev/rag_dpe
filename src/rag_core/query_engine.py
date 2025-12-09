@@ -18,34 +18,59 @@ from llama_index.vector_stores.chroma import ChromaVectorStore
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 import chromadb
 
-# Import conditionnel des LLMs externes
+# Import conditionnel des LLMs externes avec gestion d'erreurs robuste
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai").lower()  # openai, huggingface, anthropic, ollama
 
-if LLM_PROVIDER == "openai":
+# Imports conditionnels avec gestion d'erreurs - On essaie d'importer tous les packages disponibles
+# pour permettre de changer de provider via les variables d'environnement
+OpenAI = None
+Anthropic = None
+Ollama = None
+LlamaCPP = None
+HuggingFaceInferenceAPI = None
+HuggingFaceLLM = None
+
+# Essayer d'importer tous les packages (certains peuvent ne pas être installés)
+try:
     from llama_index.llms.openai import OpenAI
-elif LLM_PROVIDER == "huggingface":
-    try:
-        from llama_index.llms.huggingface import HuggingFaceInferenceAPI
-    except ImportError:
-        from llama_index.llms.huggingface import HuggingFaceLLM
-elif LLM_PROVIDER == "anthropic":
+except ImportError:
+    pass
+
+try:
+    from llama_index.llms.huggingface import HuggingFaceInferenceAPI
+except ImportError:
+    pass
+
+try:
+    from llama_index.llms.huggingface import HuggingFaceLLM
+except ImportError:
+    pass
+
+try:
     from llama_index.llms.anthropic import Anthropic
-elif LLM_PROVIDER == "ollama":
+except ImportError:
+    pass
+
+try:
     from llama_index.llms.ollama import Ollama
-else:
-    # Fallback vers LlamaCPP local si aucun provider externe n'est configuré
+except ImportError:
+    pass
+
+try:
     from llama_index.llms.llama_cpp import LlamaCPP
+except ImportError:
+    pass
 
-# Chemins
-DB_PATH = "./data/chroma_db"
+# Chemins - Utiliser des chemins absolus basés sur le répertoire du script
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+DB_PATH = os.getenv("CHROMA_DB_PATH", os.path.join(BASE_DIR, "data", "chroma_db"))
 # Chemin du modèle LLM local (utilisé uniquement si LLM_PROVIDER n'est pas configuré)
-# Le modèle doit être au format .gguf et placé dans ./data/llm_models/
-MODEL_PATH = os.getenv("LLM_MODEL_PATH", "./data/llm_models/mistral-7b-instruct-v0.2.Q4_K_M.gguf")
+MODEL_PATH = os.getenv("LLM_MODEL_PATH", os.path.join(BASE_DIR, "data", "llm_models", "mistral-7b-instruct-v0.2.Q4_K_M.gguf"))
 COLLECTION_NAME = "renovation_knowledge"
-PROMPT_PATH = "./prompts/renovation_expert.txt" # <--- Nouveau chemin vers ton fichier texte
+PROMPT_PATH = os.path.join(BASE_DIR, "prompts", "renovation_expert.txt")
 
-class RenovationRAG:
-    def __init__(self):
+class RenovationRAG: 
+    def __init__(self): 
         print("🔧 Initialisation du moteur RAG...")
         self._init_llm()
         self._init_embedding()
@@ -58,6 +83,9 @@ class RenovationRAG:
         provider = LLM_PROVIDER
         
         if provider == "openai":
+            if OpenAI is None:
+                raise ImportError("❌ Package llama-index-llms-openai non installé. Installez-le avec: pip install llama-index-llms-openai")
+            
             api_key = os.getenv("OPENAI_API_KEY")
             if not api_key:
                 raise ValueError("❌ OPENAI_API_KEY non définie. Configurez-la dans les variables d'environnement.")
@@ -75,38 +103,40 @@ class RenovationRAG:
             api_key = os.getenv("HUGGINGFACE_API_KEY")
             model_name = os.getenv("HUGGINGFACE_MODEL", "mistralai/Mistral-7B-Instruct-v0.2")
             
-            if api_key:
+            if not api_key:
+                raise ValueError("❌ HUGGINGFACE_API_KEY non définie. Configurez-la dans les variables d'environnement pour utiliser l'API Inference (gratuit et sans RAM).")
+            
+            if HuggingFaceInferenceAPI is not None:
                 print(f"🤖 Utilisation de Hugging Face Inference API : {model_name}")
-                # Utiliser l'API Inference de Hugging Face
+                print(f"🔑 API Key détectée : {api_key[:10]}...{api_key[-4:] if len(api_key) > 14 else '***'}")
                 try:
-                    from llama_index.llms.huggingface import HuggingFaceInferenceAPI
                     self.llm = HuggingFaceInferenceAPI(
                         model_name=model_name,
                         token=api_key,
                         temperature=0.1,
                         max_new_tokens=1024
                     )
-                except ImportError:
-                    # Fallback si HuggingFaceInferenceAPI n'est pas disponible
-                    print("⚠️  HuggingFaceInferenceAPI non disponible, utilisation de HuggingFaceLLM local")
-                    self.llm = HuggingFaceLLM(
-                        model_name=model_name,
-                        temperature=0.1,
-                        max_new_tokens=1024,
-                        context_window=4096
-                    )
-            else:
+                except Exception as e:
+                    raise RuntimeError(f"❌ Erreur lors de l'initialisation de Hugging Face Inference API : {e}\n"
+                                     f"💡 Vérifiez que votre clé API est valide et que le modèle {model_name} est accessible.")
+            elif HuggingFaceLLM is not None:
                 # Fallback vers modèle local Hugging Face (nécessite plus de RAM)
-                print(f"🤖 Utilisation de Hugging Face local : {model_name}")
-                print("⚠️  Note: Sans API key, le modèle sera chargé localement (nécessite beaucoup de RAM)")
+                print(f"⚠️  HuggingFaceInferenceAPI non disponible, utilisation du modèle local : {model_name}")
+                print("⚠️  ATTENTION: Le modèle sera chargé localement (nécessite beaucoup de RAM)")
                 self.llm = HuggingFaceLLM(
                     model_name=model_name,
                     temperature=0.1,
                     max_new_tokens=1024,
                     context_window=4096
                 )
+            else:
+                raise ImportError("❌ Package llama-index-llms-huggingface non installé.\n"
+                                "💡 Installez-le avec: pip install llama-index-llms-huggingface huggingface-hub")
                 
         elif provider == "anthropic":
+            if Anthropic is None:
+                raise ImportError("❌ Package llama-index-llms-anthropic non installé. Installez-le avec: pip install llama-index-llms-anthropic")
+            
             api_key = os.getenv("ANTHROPIC_API_KEY")
             if not api_key:
                 raise ValueError("❌ ANTHROPIC_API_KEY non définie. Configurez-la dans les variables d'environnement.")
@@ -121,6 +151,9 @@ class RenovationRAG:
             )
             
         elif provider == "ollama":
+            if Ollama is None:
+                raise ImportError("❌ Package llama-index-llms-ollama non installé. Installez-le avec: pip install llama-index-llms-ollama")
+            
             base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
             model_name = os.getenv("OLLAMA_MODEL", "mistral")
             print(f"🤖 Utilisation d'Ollama : {model_name} ({base_url})")
@@ -133,10 +166,13 @@ class RenovationRAG:
             
         else:
             # Fallback vers modèle local LlamaCPP
+            if LlamaCPP is None:
+                raise ImportError("❌ Package llama-index-llms-llama-cpp non installé. Installez-le avec: pip install llama-index-llms-llama-cpp")
+            
             if not os.path.exists(MODEL_PATH):
                 raise FileNotFoundError(
                     f"❌ Modèle local introuvable : {MODEL_PATH}\n"
-                    f"📁 Placez votre fichier .gguf dans : ./data/llm_models/\n"
+                    f"📁 Placez votre fichier .gguf dans : {os.path.dirname(MODEL_PATH)}\n"
                     f"💡 Ou configurez un LLM externe avec LLM_PROVIDER (openai, huggingface, anthropic, ollama)"
                 )
             
@@ -161,6 +197,8 @@ class RenovationRAG:
     def _init_vector_store(self):
         """Connexion à ChromaDB"""
         # La télémétrie est désactivée via les variables d'environnement
+        # Créer le dossier si nécessaire
+        os.makedirs(DB_PATH, exist_ok=True)
         db = chromadb.PersistentClient(path=DB_PATH)
         chroma_collection = db.get_or_create_collection(COLLECTION_NAME)
         vector_store = ChromaVectorStore(chroma_collection=chroma_collection)

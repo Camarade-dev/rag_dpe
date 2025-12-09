@@ -10,7 +10,7 @@ llama-index-core>=0.10.0
 llama-index-llms-llama-cpp>=0.1.0  # Pour modèle local (optionnel si LLM externe utilisé)
 llama-index-llms-openai>=0.1.0  # Pour OpenAI API
 llama-index-llms-anthropic>=0.1.0  # Pour Anthropic Claude API
-llama-index-llms-huggingface>=0.1.0  # Pour Hugging Face Inference API
+llama-index-llms-huggingface>=0.1.0  # Pour Hugging Face Inference API (obligatoire pour l'API externe)
 llama-index-llms-ollama>=0.1.0  # Pour Ollama
 llama-index-embeddings-huggingface>=0.1.0
 llama-index-vector-stores-chroma>=0.1.0
@@ -30,3 +30,6 @@ pymupdf
 # API FastAPI
 fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
+
+# Hugging Face Hub (nécessaire pour l'Inference API)
+huggingface-hub>=0.20.0
