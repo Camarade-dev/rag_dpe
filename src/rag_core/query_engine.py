@@ -190,8 +190,37 @@ class RenovationRAG:
         print("✅ LLM initialisé avec succès")
 
     def _init_embedding(self):
-        """Charge le modèle de vectorisation"""
-        self.embed_model = HuggingFaceEmbedding(model_name="sentence-transformers/all-MiniLM-L6-v2")
+        """Charge le modèle de vectorisation (API ou local selon configuration)"""
+        # Vérifier si on utilise l'API Hugging Face pour les embeddings (évite torch)
+        use_api_embeddings = os.getenv("USE_API_EMBEDDINGS", "false").lower() == "true"
+        
+        if use_api_embeddings:
+            # Utiliser l'API Hugging Face (pas de torch nécessaire, économise ~400 MB RAM)
+            try:
+                # Essayer d'importer HuggingFaceInferenceAPIEmbedding
+                from llama_index.embeddings.huggingface import HuggingFaceInferenceAPIEmbedding
+                api_key = os.getenv("HUGGINGFACE_API_KEY")
+                if not api_key:
+                    raise ValueError("❌ HUGGINGFACE_API_KEY requise pour les embeddings API")
+                
+                self.embed_model = HuggingFaceInferenceAPIEmbedding(
+                    api_key=api_key,
+                    model_name="sentence-transformers/all-MiniLM-L6-v2"
+                )
+                print("✅ Embeddings via API Hugging Face (pas de modèle en mémoire, économise ~400 MB RAM)")
+            except ImportError as e:
+                error_msg = f"❌ HuggingFaceInferenceAPIEmbedding non disponible : {e}"
+                print(error_msg)
+                print("💡 Vérifiez que llama-index-embeddings-huggingface est installé")
+                print("💡 Si sentence-transformers n'est pas installé, c'est normal avec requirements_render.txt")
+                raise ImportError(f"{error_msg}\n💡 Sur Render, utilisez requirements_render.txt et vérifiez que USE_API_EMBEDDINGS=true")
+            except Exception as e:
+                raise RuntimeError(f"❌ Erreur lors de l'initialisation des embeddings API : {e}")
+        else:
+            # Version locale (nécessite sentence-transformers et torch)
+            self.embed_model = HuggingFaceEmbedding(model_name="sentence-transformers/all-MiniLM-L6-v2")
+            print("📦 Embeddings locaux (modèle chargé en mémoire)")
+        
         Settings.embed_model = self.embed_model
 
     def _init_vector_store(self):

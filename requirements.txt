@@ -23,6 +23,8 @@ numpy>=1.24.0,<2.0.0
 tokenizers==0.15.2
 
 # Embeddings et lecture PDF
+# NOTE: sentence-transformers est installé pour le développement local
+# Pour Render, utilisez requirements_render.txt qui exclut sentence-transformers
 sentence-transformers
 pypdf
 pymupdf
@@ -32,10 +34,11 @@ fpdf2
 fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
 
-# Hugging Face Hub (nécessaire pour l'Inference API)
+# Hugging Face Hub (nécessaire pour l'Inference API et les embeddings API)
 huggingface-hub>=0.20.0
 
 # NOTE IMPORTANTE :
-# - llama-index-llms-huggingface installe torch/transformers même si non nécessaires pour Inference API
-# - C'est une limitation du package, mais HuggingFaceInferenceAPI n'utilise pas torch (appels HTTP)
-# - Pour vraiment éviter torch, il faudrait utiliser directement l'API Hugging Face sans llama-index
+# - Si USE_API_EMBEDDINGS=true : sentence-transformers ne sera PAS installé (économise torch, ~400 MB RAM)
+# - Si USE_API_EMBEDDINGS=false : sentence-transformers sera installé (nécessite torch)
+# - HuggingFaceInferenceAPI n'utilise pas torch (appels HTTP uniquement)
+# - HuggingFaceInferenceAPIEmbedding n'utilise pas torch non plus (appels HTTP uniquement)
