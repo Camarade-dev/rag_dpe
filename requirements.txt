@@ -26,6 +26,7 @@ tokenizers==0.15.2
 sentence-transformers
 pypdf
 pymupdf
+fpdf2
 
 # API FastAPI
 fastapi>=0.115.0

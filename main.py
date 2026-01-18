@@ -16,6 +16,7 @@ logging.getLogger("chromadb.telemetry").setLevel(logging.CRITICAL)
 # Ajout du chemin src pour trouver tes modules
 sys.path.append("./src")
 from rag_core.query_engine import RenovationRAG
+from pdf_generator import parse_building_info, parse_rag_response, generate_renovation_pdf
 
 def lire_prompt_externe(chemin_fichier):
     """Fonction utilitaire pour lire le contenu d'un fichier texte"""
@@ -110,6 +111,16 @@ def main():
 
         # 4. Sauvegarde dans les deux fichiers
         sauvegarder_resultats(texte_complet, info_sources)
+
+        # 5. Génération du PDF
+        print("\n📄 Génération du rapport PDF...")
+        try:
+            building_info = parse_building_info(prompt_utilisateur)
+            parsed_response = parse_rag_response(texte_complet)
+            pdf_path = os.path.join("outputs", "rapport_renovation.pdf")
+            generate_renovation_pdf(building_info, parsed_response, pdf_path)
+        except Exception as e:
+            print(f"❌ Erreur lors de la génération du PDF: {e}")
 
 if __name__ == "__main__":
     main()

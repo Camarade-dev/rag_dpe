@@ -28,6 +28,7 @@ import sys
 # Ajouter le chemin src pour importer le RAG
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 from rag_core.query_engine import RenovationRAG
+from pdf_generator import parse_building_info, parse_rag_response, generate_renovation_pdf
 
 # Initialiser le RAG une seule fois au démarrage
 rag_engine = None
@@ -170,6 +171,91 @@ Peux-tu me donner des conseils personnalisés de rénovation énergétique adapt
                 "sources": sources
             }
         )
+        
+    except Exception as e:
+        print(f"❌ Erreur lors de la requête RAG: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Erreur lors de la génération de la réponse: {str(e)}")
+
+@app.post("/query/pdf")
+async def query_rag_and_generate_pdf(request: RAGRequest):
+    """
+    Pose une question au système RAG, génère une réponse et crée un PDF du rapport
+    """
+    global rag_engine
+    
+    if not rag_engine:
+        raise HTTPException(status_code=503, detail="Moteur RAG non initialisé")
+    
+    try:
+        # Construire la question personnalisée si des résultats DPE sont fournis
+        question = request.question
+        if request.dpe_results:
+            # Personnaliser la question avec les résultats du DPE
+            classe_dpe = request.dpe_results.get("classe_dpe_finale", "inconnue")
+            etiquette_energie = request.dpe_results.get("etiquette_energie", "inconnue")
+            
+            question = f"""Mon logement a un DPE {classe_dpe} (étiquette énergétique {etiquette_energie}).
+{request.question}
+
+Peux-tu me donner des conseils personnalisés de rénovation énergétique adaptés à mon DPE ?"""
+        
+        # Interroger le RAG
+        response = rag_engine.query(question)
+        
+        # Extraire le texte de la réponse (streaming)
+        texte_complet = ""
+        if hasattr(response, 'response_gen'):
+            for token in response.response_gen:
+                texte_complet += token
+        else:
+            texte_complet = str(response)
+        
+        # Extraire les sources
+        sources = []
+        if hasattr(response, 'source_nodes') and response.source_nodes:
+            for node in response.source_nodes:
+                sources.append({
+                    "file_name": node.metadata.get('file_name', 'Inconnu'),
+                    "page": node.metadata.get('page_label', '?'),
+                    "score": float(node.score) if node.score else 0.0
+                })
+        
+        # Générer le PDF
+        outputs_dir = os.path.join(BASE_DIR, "outputs")
+        os.makedirs(outputs_dir, exist_ok=True)
+        pdf_filename = f"rapport_renovation_{os.urandom(8).hex()}.pdf"
+        pdf_path = os.path.join(outputs_dir, pdf_filename)
+        
+        try:
+            # Parser les informations du bâtiment depuis la question
+            building_info = parse_building_info(question)
+            # Parser la réponse du RAG
+            parsed_response = parse_rag_response(texte_complet)
+            # Générer le PDF
+            generate_renovation_pdf(building_info, parsed_response, pdf_path)
+            
+            # Retourner le PDF
+            return FileResponse(
+                pdf_path,
+                media_type="application/pdf",
+                filename=pdf_filename,
+                headers={"Content-Disposition": f'inline; filename="{pdf_filename}"'}
+            )
+        except Exception as pdf_error:
+            print(f"❌ Erreur lors de la génération du PDF: {pdf_error}")
+            import traceback
+            traceback.print_exc()
+            # En cas d'erreur PDF, retourner quand même la réponse texte
+            return RAGResponse(
+                ok=True,
+                data={
+                    "response": texte_complet,
+                    "sources": sources,
+                    "pdf_error": str(pdf_error)
+                }
+            )
         
     except Exception as e:
         print(f"❌ Erreur lors de la requête RAG: {e}")

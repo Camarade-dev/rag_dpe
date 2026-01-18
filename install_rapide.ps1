@@ -34,3 +34,12 @@ Write-Host "Vérifiez avec: pip list | Select-String -Pattern 'llama|chroma'" -F
 
 
 
+
+
+
+
+
+
+
+
+
