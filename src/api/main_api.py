@@ -39,12 +39,41 @@ async def lifespan(app: FastAPI):
     global rag_engine
     # Startup
     try:
+        print("=" * 60)
         print("🔧 Initialisation du moteur RAG...")
+        print("=" * 60)
+        print(f"📊 USE_API_EMBEDDINGS={os.getenv('USE_API_EMBEDDINGS', 'non définie')}")
+        print(f"📊 LLM_PROVIDER={os.getenv('LLM_PROVIDER', 'non définie')}")
+        print(f"📊 HUGGINGFACE_API_KEY={'✅ configurée' if os.getenv('HUGGINGFACE_API_KEY') else '❌ non configurée'}")
+        
+        # Vérifier si torch est installé (ne devrait pas l'être avec USE_API_EMBEDDINGS=true)
+        try:
+            import torch
+            print(f"⚠️  AVERTISSEMENT: torch est installé (version {torch.__version__}) - cela utilise ~400 MB RAM")
+        except ImportError:
+            print("✅ torch n'est pas installé - bonne configuration pour économiser la RAM")
+        
+        print("\n🚀 Démarrage de l'initialisation du RAG...")
         rag_engine = RenovationRAG()
+        print("=" * 60)
         print("✅ Moteur RAG prêt !")
+        print("=" * 60)
+        print("🌐 L'API est prête à recevoir des requêtes sur le port $PORT")
+        
     except Exception as e:
-        print(f"❌ Erreur lors de l'initialisation du RAG: {e}")
-        raise
+        print("=" * 60)
+        print(f"❌ ERREUR CRITIQUE lors de l'initialisation du RAG:")
+        print(f"   Type: {type(e).__name__}")
+        print(f"   Message: {str(e)}")
+        print("=" * 60)
+        import traceback
+        traceback.print_exc()
+        print("=" * 60)
+        # Ne pas raise pour permettre à l'API de démarrer quand même
+        # Les requêtes retourneront une erreur 503 mais l'API sera accessible
+        print("⚠️  L'API démarre mais le RAG n'est pas initialisé - les requêtes échoueront")
+        rag_engine = None
+        print("🌐 L'API est quand même accessible sur le port $PORT (mais le RAG ne fonctionnera pas)")
     yield
     # Shutdown (nettoyage si nécessaire)
     pass

@@ -207,8 +207,16 @@ class RenovationRAG:
         if use_api_embeddings:
             # Utiliser l'API Hugging Face (pas de torch nécessaire, économise ~400 MB RAM)
             try:
-                # Essayer d'importer HuggingFaceInferenceAPIEmbedding
-                from llama_index.embeddings.huggingface import HuggingFaceInferenceAPIEmbedding
+                # Essayer d'importer HuggingFaceInferenceAPIEmbedding (nouvelle API)
+                # D'abord essayer la nouvelle API recommandée
+                try:
+                    from llama_index.embeddings.huggingface_api import HuggingFaceInferenceAPIEmbedding
+                    print("📦 Utilisation de llama-index-embeddings-huggingface-api (nouvelle API)")
+                except ImportError:
+                    # Fallback vers l'ancienne API (dépréciée mais fonctionnelle)
+                    from llama_index.embeddings.huggingface import HuggingFaceInferenceAPIEmbedding
+                    print("📦 Utilisation de llama-index-embeddings-huggingface (ancienne API, dépréciée)")
+                
                 api_key = os.getenv("HUGGINGFACE_API_KEY")
                 if not api_key:
                     raise ValueError("❌ HUGGINGFACE_API_KEY requise pour les embeddings API")
@@ -240,40 +248,69 @@ class RenovationRAG:
 
     def _init_vector_store(self):
         """Connexion à ChromaDB"""
-        # La télémétrie est désactivée via les variables d'environnement
-        # Créer le dossier si nécessaire
-        os.makedirs(DB_PATH, exist_ok=True)
-        db = chromadb.PersistentClient(path=DB_PATH)
-        chroma_collection = db.get_or_create_collection(COLLECTION_NAME)
-        vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
-        self.storage_context = StorageContext.from_defaults(vector_store=vector_store)
+        try:
+            print(f"💾 Connexion à ChromaDB dans : {DB_PATH}")
+            # La télémétrie est désactivée via les variables d'environnement
+            # Créer le dossier si nécessaire
+            os.makedirs(DB_PATH, exist_ok=True)
+            print("📂 Dossier ChromaDB créé/vérifié")
+            
+            db = chromadb.PersistentClient(path=DB_PATH)
+            print("✅ Client ChromaDB créé")
+            
+            chroma_collection = db.get_or_create_collection(COLLECTION_NAME)
+            print(f"✅ Collection '{COLLECTION_NAME}' créée/récupérée")
+            
+            vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
+            print("✅ VectorStore créé")
+            
+            self.storage_context = StorageContext.from_defaults(vector_store=vector_store)
+            print("✅ StorageContext créé")
+        except Exception as e:
+            print(f"❌ Erreur lors de l'initialisation de ChromaDB : {e}")
+            import traceback
+            traceback.print_exc()
+            raise
 
     def _init_query_engine(self):
         """Configure le prompt depuis un fichier et le moteur de recherche"""
-        index = VectorStoreIndex.from_vector_store(
-            self.storage_context.vector_store,
-            storage_context=self.storage_context,
-        )
+        try:
+            print(f"🔍 Création de l'index depuis le vector store...")
+            index = VectorStoreIndex.from_vector_store(
+                self.storage_context.vector_store,
+                storage_context=self.storage_context,
+            )
+            print("✅ Index créé")
 
-        # --- NOUVEAU CODE : Lecture du fichier txt ---
-        if not os.path.exists(PROMPT_PATH):
-            raise FileNotFoundError(f"❌ Le fichier de prompt est introuvable : {PROMPT_PATH}")
+            # --- NOUVEAU CODE : Lecture du fichier txt ---
+            print(f"📄 Lecture du prompt depuis : {PROMPT_PATH}")
+            if not os.path.exists(PROMPT_PATH):
+                raise FileNotFoundError(f"❌ Le fichier de prompt est introuvable : {PROMPT_PATH}")
 
-        with open(PROMPT_PATH, "r", encoding="utf-8") as f:
-            template_content = f.read()
-        
-        # On vérifie que les variables obligatoires sont bien dans le texte
-        if "{context_str}" not in template_content or "{query_str}" not in template_content:
-            raise ValueError("❌ Le fichier prompt doit contenir {context_str} et {query_str}")
+            with open(PROMPT_PATH, "r", encoding="utf-8") as f:
+                template_content = f.read()
+            print("✅ Prompt lu")
+            
+            # On vérifie que les variables obligatoires sont bien dans le texte
+            if "{context_str}" not in template_content or "{query_str}" not in template_content:
+                raise ValueError("❌ Le fichier prompt doit contenir {context_str} et {query_str}")
 
-        qa_template = PromptTemplate(template_content)
-        # ---------------------------------------------
+            qa_template = PromptTemplate(template_content)
+            print("✅ Template créé")
+            # ---------------------------------------------
 
-        self.query_engine = index.as_query_engine(
-            text_qa_template=qa_template,
-            streaming=True,
-            similarity_top_k=3 # Limite de 3 documents pour plus de contexte
-        )
+            print("🔧 Configuration du query engine...")
+            self.query_engine = index.as_query_engine(
+                text_qa_template=qa_template,
+                streaming=True,
+                similarity_top_k=3 # Limite de 3 documents pour plus de contexte
+            )
+            print("✅ Query engine configuré")
+        except Exception as e:
+            print(f"❌ Erreur lors de l'initialisation du query engine : {e}")
+            import traceback
+            traceback.print_exc()
+            raise
 
     def query(self, user_question):
         """Méthode publique pour poser une question"""

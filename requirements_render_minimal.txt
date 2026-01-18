@@ -1,0 +1,38 @@
+# ⚡ VERSION MINIMALE POUR RENDER (512MB RAM)
+# Exclut TOUS les packages lourds (torch, onnxruntime, sentence-transformers)
+
+# Core llama-index
+llama-index-core>=0.10.0,<0.12.0
+
+# Hugging Face Hub (nécessaire pour les API)
+huggingface-hub>=0.20.0
+
+# Requêtes HTTP
+requests>=2.32.0
+httpx>=0.28.0
+
+# Vector store
+llama-index-vector-stores-chroma>=0.1.0,<0.3.0
+
+# ChromaDB (sans onnxruntime si possible)
+chromadb>=0.4.22,<0.5.0
+
+# NumPy (nécessaire pour ChromaDB)
+numpy>=1.24.0,<2.0.0
+
+# Lecture PDF
+pypdf>=5.0.0
+pymupdf>=1.23.0
+
+# Génération PDF
+fpdf2>=2.8.0
+
+# API FastAPI
+fastapi>=0.115.0,<0.130.0
+uvicorn[standard]>=0.32.0,<0.41.0
+pydantic>=2.0.0,<3.0.0
+
+# IMPORTANT: On n'installe PAS :
+# - llama-index-llms-huggingface (installe torch)
+# - llama-index-embeddings-huggingface (installe torch)
+# On les installera manuellement sans dépendances

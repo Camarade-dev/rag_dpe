@@ -13,7 +13,9 @@ llama-index-core>=0.10.0
 llama-index-llms-huggingface>=0.1.0
 
 # Embeddings via API Hugging Face (pas besoin de sentence-transformers)
-# Note: peut installer torch comme dépendance optionnelle
+# Essayer d'abord la nouvelle API recommandée
+llama-index-embeddings-huggingface-api>=0.1.0
+# Fallback vers l'ancienne API si nécessaire
 llama-index-embeddings-huggingface>=0.1.0
 
 # Vector store
