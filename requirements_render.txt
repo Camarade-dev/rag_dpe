@@ -1,14 +1,19 @@
-# ⚡ VERSION OPTIMISÉE POUR RENDER (512MB RAM)
-# Exclut sentence-transformers/torch pour économiser ~400 MB RAM
+# ⚡ VERSION ULTRA-OPTIMISÉE POUR RENDER (512MB RAM)
+# Exclut sentence-transformers/torch/onnxruntime pour économiser ~400 MB RAM
 # Utilise l'API Hugging Face pour les embeddings (USE_API_EMBEDDINGS=true)
 
-# Core llama-index
+# IMPORTANT: Utiliser --no-deps et installer manuellement pour éviter torch
+# pip install --no-deps pour chaque package puis installer seulement les dépendances nécessaires
+
+# Core llama-index (sans dépendances lourdes)
 llama-index-core>=0.10.0
 
 # Hugging Face LLM (API Inference - pas besoin de torch)
+# Note: peut installer torch comme dépendance optionnelle
 llama-index-llms-huggingface>=0.1.0
 
 # Embeddings via API Hugging Face (pas besoin de sentence-transformers)
+# Note: peut installer torch comme dépendance optionnelle
 llama-index-embeddings-huggingface>=0.1.0
 
 # Vector store

@@ -15,7 +15,7 @@ logging.getLogger("chromadb.telemetry").setLevel(logging.CRITICAL)
 
 from llama_index.core import VectorStoreIndex, StorageContext, Settings, PromptTemplate
 from llama_index.vector_stores.chroma import ChromaVectorStore
-from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+# Ne pas importer HuggingFaceEmbedding ici (charge torch) - import conditionnel dans _init_embedding
 import chromadb
 
 # Import conditionnel des LLMs externes avec gestion d'erreurs robuste
@@ -72,9 +72,19 @@ PROMPT_PATH = os.path.join(BASE_DIR, "prompts", "renovation_expert.txt")
 class RenovationRAG: 
     def __init__(self): 
         print("🔧 Initialisation du moteur RAG...")
+        print(f"📊 Variables d'environnement : USE_API_EMBEDDINGS={os.getenv('USE_API_EMBEDDINGS', 'non définie')}")
+        print(f"📊 LLM_PROVIDER={os.getenv('LLM_PROVIDER', 'non définie')}")
+        
+        print("🤖 Étape 1/4 : Initialisation du LLM...")
         self._init_llm()
+        
+        print("🧠 Étape 2/4 : Initialisation des embeddings...")
         self._init_embedding()
+        
+        print("💾 Étape 3/4 : Connexion à ChromaDB...")
         self._init_vector_store()
+        
+        print("🔍 Étape 4/4 : Configuration du query engine...")
         self._init_query_engine()
         print("✅ Moteur RAG prêt à l'emploi !")
 
@@ -218,8 +228,13 @@ class RenovationRAG:
                 raise RuntimeError(f"❌ Erreur lors de l'initialisation des embeddings API : {e}")
         else:
             # Version locale (nécessite sentence-transformers et torch)
-            self.embed_model = HuggingFaceEmbedding(model_name="sentence-transformers/all-MiniLM-L6-v2")
-            print("📦 Embeddings locaux (modèle chargé en mémoire)")
+            # Import conditionnel pour éviter de charger torch si on ne l'utilise pas
+            try:
+                from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+                self.embed_model = HuggingFaceEmbedding(model_name="sentence-transformers/all-MiniLM-L6-v2")
+                print("📦 Embeddings locaux (modèle chargé en mémoire)")
+            except ImportError as e:
+                raise ImportError(f"❌ HuggingFaceEmbedding non disponible : {e}\n💡 Installez sentence-transformers avec: pip install sentence-transformers")
         
         Settings.embed_model = self.embed_model
 
