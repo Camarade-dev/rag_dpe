@@ -222,18 +222,32 @@ class RenovationRAG:
                     raise ValueError("❌ HUGGINGFACE_API_KEY requise pour les embeddings API")
                 
                 # Utiliser un modèle compatible avec l'API Hugging Face Inference
-                # sentence-transformers/all-MiniLM-L6-v2 retourne 410 Gone (obsolète)
-                # Utilisons un modèle plus récent et compatible avec l'API
-                # Le modèle peut être configuré via HUGGINGFACE_EMBEDDING_MODEL (optionnel)
+                # Les modèles sentence-transformers retournent 410 Gone via feature-extraction
+                # Essayons d'utiliser l'API text-embeddings avec un modèle compatible
+                # Ou utilisons intfloat/multilingual-e5-base qui fonctionne avec l'API
                 embedding_model_name = os.getenv(
                     "HUGGINGFACE_EMBEDDING_MODEL", 
-                    "sentence-transformers/all-mpnet-base-v2"  # Modèle par défaut (plus récent et compatible)
+                    "intfloat/multilingual-e5-base"  # Modèle qui fonctionne avec l'API text-embeddings
                 )
                 print(f"📦 Modèle d'embedding: {embedding_model_name}")
-                self.embed_model = HuggingFaceInferenceAPIEmbedding(
-                    api_key=api_key,
-                    model_name=embedding_model_name
-                )
+                try:
+                    self.embed_model = HuggingFaceInferenceAPIEmbedding(
+                        api_key=api_key,
+                        model_name=embedding_model_name
+                    )
+                except Exception as e:
+                    # Si le modèle ne fonctionne pas, essayons un autre
+                    print(f"⚠️  Modèle {embedding_model_name} ne fonctionne pas: {e}")
+                    print("🔄 Tentative avec BAAI/bge-small-en-v1.5...")
+                    try:
+                        self.embed_model = HuggingFaceInferenceAPIEmbedding(
+                            api_key=api_key,
+                            model_name="BAAI/bge-small-en-v1.5"
+                        )
+                        print("✅ Modèle BAAI/bge-small-en-v1.5 sélectionné")
+                    except Exception as e2:
+                        print(f"❌ BAAI/bge-small-en-v1.5 ne fonctionne pas non plus: {e2}")
+                        raise RuntimeError(f"❌ Impossible de trouver un modèle d'embedding compatible. Erreurs: {e}, {e2}")
                 print("✅ Embeddings via API Hugging Face (pas de modèle en mémoire, économise ~400 MB RAM)")
             except ImportError as e:
                 error_msg = f"❌ HuggingFaceInferenceAPIEmbedding non disponible : {e}"
