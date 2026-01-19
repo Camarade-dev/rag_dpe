@@ -1,25 +1,51 @@
-# --- LLAMA INDEX (On laisse pip choisir les versions compatibles) ---
-llama-index-core
-llama-index-readers-file
-llama-index-llms-huggingface-api
-llama-index-embeddings-huggingface-api
-llama-index-vector-stores-chroma
+# ⚡ VERSION OPTIMISÉE POUR HUGGING FACE INFERENCE API
+# Utilise uniquement les packages nécessaires, avec versions spécifiques pour éviter le backtracking
 
-# --- CLIENT API & HUB ---
-huggingface-hub>=0.25.0
-aiohttp
+# Core llama-index
+llama-index-core>=0.10.0
 
-# --- DATABASE ---
+# Hugging Face LLM (obligatoire pour l'API externe)
+# Note: HuggingFaceInferenceAPI n'a PAS besoin de torch localement (appels HTTP uniquement)
+# PRIORITÉ: Utiliser la nouvelle API recommandée
+llama-index-llms-huggingface-api>=0.1.0
+# Fallback vers l'ancienne API si nécessaire (dépréciée)
+llama-index-llms-huggingface>=0.1.0
+
+# Embeddings et vector store
+# PRIORITÉ: Utiliser la nouvelle API recommandée (corrige l'erreur 410)
+llama-index-embeddings-huggingface-api>=0.1.0
+# Fallback vers l'ancienne API si nécessaire (dépréciée, peut causer 410 Gone)
+llama-index-embeddings-huggingface>=0.1.0
+llama-index-vector-stores-chroma>=0.1.0
+llama-index-readers-file>=0.1.0
+
+# ChromaDB - version avec wheels précompilés
 chromadb>=0.4.22,<0.5.0
-numpy<2.0.0
 
-# --- SERVEUR ---
-fastapi
-uvicorn[standard]
-pydantic>=2.9.0
+# NumPy - version avec wheels précompilés (évite la compilation)
+numpy>=1.24.0,<2.0.0
 
-# --- UTILS ---
+# Tokenizers - version spécifique avec wheels précompilés
+tokenizers==0.15.2
+
+# Embeddings et lecture PDF
+# NOTE: sentence-transformers est installé pour le développement local
+# Pour Render, utilisez requirements_render.txt qui exclut sentence-transformers
+sentence-transformers
 pypdf
 pymupdf
 fpdf2
-python-multipart
+
+# API FastAPI
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+
+# Hugging Face Hub (nécessaire pour l'Inference API et les embeddings API)
+huggingface-hub>=0.20.0
+
+# NOTE IMPORTANTE :
+# - Si USE_API_EMBEDDINGS=true : sentence-transformers ne sera PAS installé (économise torch, ~400 MB RAM)
+# - Si USE_API_EMBEDDINGS=false : sentence-transformers sera installé (nécessite torch)
+# - HuggingFaceInferenceAPI (nouvelle API) n'utilise pas torch (appels HTTP uniquement)
+# - HuggingFaceInferenceAPIEmbedding (nouvelle API) n'utilise pas torch non plus (appels HTTP uniquement)
+# - Les nouvelles classes (huggingface-api) corrigent l'erreur 410 Gone
