@@ -88,15 +88,15 @@ PROMPT_PATH = os.path.join(BASE_DIR, "prompts", "renovation_expert.txt")
 
 class HuggingFaceRouterLLM(CustomLLM):
     """
-    Wrapper LLM personnalisé pour Hugging Face utilisant le SDK officiel huggingface_hub
-    Utilise chat_completion qui fonctionne avec le nouveau router
+    Wrapper LLM personnalise pour Hugging Face utilisant des appels HTTP directs
+    Utilise le nouveau router.huggingface.co avec l'endpoint chat/completions
+    Pas de dependance au SDK huggingface_hub (evite les conflits de versions)
     """
     
     api_key: str = ""
-    model_name: str = "Qwen/Qwen2.5-72B-Instruct"  # Modèle gratuit qui fonctionne
+    model_name: str = "Qwen/Qwen2.5-72B-Instruct"
     temperature: float = 0.1
     max_new_tokens: int = 512
-    _client: Any = None
     
     def __init__(
         self,
@@ -111,14 +111,7 @@ class HuggingFaceRouterLLM(CustomLLM):
         self.model_name = model_name
         self.temperature = temperature
         self.max_new_tokens = max_new_tokens
-        
-        # Initialiser le client HuggingFace
-        try:
-            from huggingface_hub import InferenceClient
-            self._client = InferenceClient(token=api_key)
-            print(f"   Client HuggingFace initialisé pour {model_name}")
-        except ImportError:
-            raise ImportError("huggingface_hub non installé. pip install huggingface_hub>=1.0.0")
+        print(f"   LLM wrapper initialise pour {model_name}")
     
     @property
     def metadata(self) -> LLMMetadata:
@@ -126,81 +119,101 @@ class HuggingFaceRouterLLM(CustomLLM):
             context_window=8192,
             num_output=self.max_new_tokens,
             model_name=self.model_name,
-            is_chat_model=True  # Utilise chat_completion
+            is_chat_model=True
         )
     
     def _call_api(self, prompt: str, max_retries: int = 5) -> str:
-        """Appelle l'API Hugging Face via chat_completion avec retries robustes"""
-        # Limiter la taille du prompt pour éviter les erreurs
-        max_prompt_chars = 12000  # ~3000 tokens environ
+        """Appelle l'API Hugging Face via HTTP direct (chat/completions)"""
+        # Limiter la taille du prompt
+        max_prompt_chars = 10000
         if len(prompt) > max_prompt_chars:
             print(f"   Prompt trop long ({len(prompt)} chars), truncation...")
             prompt = prompt[:max_prompt_chars] + "..."
+        
+        # URL du nouveau router avec endpoint chat/completions
+        url = f"https://router.huggingface.co/hf-inference/models/{self.model_name}/v1/chat/completions"
+        
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": self.model_name,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": self.max_new_tokens,
+            "temperature": max(0.01, self.temperature),
+            "stream": False
+        }
         
         last_error = None
         
         for attempt in range(max_retries):
             try:
-                print(f"   Appel LLM via chat_completion (tentative {attempt + 1}/{max_retries})...")
+                print(f"   Appel LLM (tentative {attempt + 1}/{max_retries})...")
                 
-                # Utiliser chat_completion qui fonctionne avec le nouveau router
-                messages = [{"role": "user", "content": prompt}]
-                
-                result = self._client.chat_completion(
-                    messages=messages,
-                    model=self.model_name,
-                    max_tokens=self.max_new_tokens,
-                    temperature=max(0.01, self.temperature)
+                response = requests.post(
+                    url,
+                    headers=headers,
+                    json=payload,
+                    timeout=180
                 )
                 
-                # Extraire le texte de la réponse
-                if hasattr(result, 'choices') and len(result.choices) > 0:
-                    text = result.choices[0].message.content
-                    if text:
-                        print(f"   Reponse LLM recue ({len(text)} caracteres)")
-                        return text
-                
-                # Format alternatif
-                if isinstance(result, dict):
-                    choices = result.get('choices', [])
-                    if choices:
-                        text = choices[0].get('message', {}).get('content', '')
+                if response.status_code == 200:
+                    data = response.json()
+                    # Format OpenAI-compatible
+                    choices = data.get("choices", [])
+                    if choices and len(choices) > 0:
+                        text = choices[0].get("message", {}).get("content", "")
                         if text:
+                            print(f"   Reponse LLM recue ({len(text)} chars)")
                             return text
+                    print(f"   Reponse vide: {str(data)[:200]}")
+                    last_error = "Reponse vide"
+                    continue
                 
-                print(f"   Reponse vide ou format inattendu")
-                last_error = "Réponse vide"
+                elif response.status_code == 503:
+                    wait_time = min(20 * (attempt + 1), 60)
+                    print(f"   Modele en chargement (503), attente {wait_time}s...")
+                    time.sleep(wait_time)
+                    last_error = "503 - Loading"
+                    continue
+                
+                elif response.status_code == 500:
+                    wait_time = min(10 * (attempt + 1), 30)
+                    print(f"   Erreur serveur (500), retry dans {wait_time}s...")
+                    time.sleep(wait_time)
+                    last_error = "500 - Server error"
+                    continue
+                
+                elif response.status_code == 429:
+                    wait_time = min(30 * (attempt + 1), 120)
+                    print(f"   Rate limit (429), attente {wait_time}s...")
+                    time.sleep(wait_time)
+                    last_error = "429 - Rate limited"
+                    continue
+                
+                else:
+                    err_text = response.text[:200] if response.text else str(response.status_code)
+                    print(f"   Erreur HTTP {response.status_code}: {err_text}")
+                    last_error = f"{response.status_code} - {err_text}"
+                    if attempt < max_retries - 1:
+                        time.sleep(5)
+                        continue
+                    
+            except requests.exceptions.Timeout:
+                wait_time = min(15 * (attempt + 1), 60)
+                print(f"   Timeout, retry dans {wait_time}s...")
+                time.sleep(wait_time)
+                last_error = "Timeout"
                 continue
                 
             except Exception as e:
-                error_str = str(e)
-                last_error = error_str
-                print(f"   Erreur: {error_str[:150]}")
-                
-                # Gestion des erreurs spécifiques
-                if "503" in error_str or "loading" in error_str.lower():
-                    wait_time = min(20 * (attempt + 1), 60)
-                    print(f"   Modele en chargement, attente {wait_time}s...")
-                    time.sleep(wait_time)
-                    continue
-                
-                elif "429" in error_str or "rate" in error_str.lower():
-                    wait_time = min(30 * (attempt + 1), 120)
-                    print(f"   Rate limit, attente {wait_time}s...")
-                    time.sleep(wait_time)
-                    continue
-                
-                elif "500" in error_str:
-                    wait_time = min(10 * (attempt + 1), 30)
-                    print(f"   Erreur serveur, retry dans {wait_time}s...")
-                    time.sleep(wait_time)
-                    continue
-                
-                elif attempt < max_retries - 1:
+                last_error = str(e)
+                print(f"   Erreur: {last_error[:100]}")
+                if attempt < max_retries - 1:
                     time.sleep(5)
                     continue
-                
-                raise RuntimeError(f"Erreur LLM: {e}")
         
         raise RuntimeError(f"Echec apres {max_retries} tentatives. Derniere erreur: {last_error}")
     

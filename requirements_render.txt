@@ -1,24 +1,8 @@
-# ⚡ VERSION ULTRA-OPTIMISÉE POUR RENDER (512MB RAM)
-# Exclut sentence-transformers/torch/onnxruntime pour économiser ~400 MB RAM
-# Utilise l'API Hugging Face pour les embeddings (USE_API_EMBEDDINGS=true)
+# VERSION OPTIMISEE POUR RENDER (512MB RAM)
+# Utilise l'API Hugging Face pour les embeddings et le LLM
 
-# IMPORTANT: Utiliser --no-deps et installer manuellement pour éviter torch
-# pip install --no-deps pour chaque package puis installer seulement les dépendances nécessaires
-
-# Core llama-index (sans dépendances lourdes)
+# Core llama-index
 llama-index-core>=0.10.0
-
-# Hugging Face LLM (API Inference - pas besoin de torch)
-# PRIORITÉ: Utiliser la nouvelle API recommandée (corrige les warnings de dépréciation)
-llama-index-llms-huggingface-api>=0.1.0
-# Fallback vers l'ancienne API si nécessaire (dépréciée)
-llama-index-llms-huggingface>=0.1.0
-
-# Embeddings via API Hugging Face (pas besoin de sentence-transformers)
-# PRIORITÉ: Utiliser la nouvelle API recommandée (corrige l'erreur 410 Gone)
-llama-index-embeddings-huggingface-api>=0.1.0
-# Fallback vers l'ancienne API si nécessaire (dépréciée, peut causer 410 Gone)
-llama-index-embeddings-huggingface>=0.1.0
 
 # Vector store
 llama-index-vector-stores-chroma>=0.1.0
@@ -27,36 +11,29 @@ llama-index-readers-file>=0.1.0
 # ChromaDB
 chromadb>=0.4.22,<0.5.0
 
-# onnxruntime CPU (nécessaire pour ChromaDB DefaultEmbeddingFunction, mais on ne l'utilise pas)
-# Version minimale CPU-only (~50 MB au lieu de ~200 MB pour la version complète)
+# onnxruntime CPU (necessaire pour ChromaDB)
 onnxruntime>=1.16.0
 
-# NumPy (nécessaire pour ChromaDB) 
+# NumPy
 numpy>=1.24.0,<2.0.0
-
-# Tokenizers
-tokenizers==0.15.2
 
 # Lecture PDF
 pypdf
 pymupdf
 
-# Génération PDF
+# Generation PDF
 fpdf2
 
 # API FastAPI
 fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
 
-# Hugging Face Hub (version 1.0+ requise pour le nouveau router)
-huggingface-hub>=1.0.0
+# Hugging Face Hub (version recente pour le nouveau router)
+# Laisser pip resoudre les conflits de version
+huggingface-hub>=0.20.0
 
-# Requests (nécessaire pour le wrapper personnalisé d'embeddings)
+# Requests
 requests>=2.31.0
 
-# NOTE IMPORTANTE :
-# - sentence-transformers est EXCLU (économise torch, ~400 MB RAM)
-# - Les embeddings utilisent l'API Hugging Face via router.huggingface.co (USE_API_EMBEDDINGS=true)
-# - Le wrapper personnalisé utilise: https://router.huggingface.co/hf-inference/models/{model}/pipeline/feature-extraction
-# - onnxruntime est nécessaire pour ChromaDB (conservé, ~50 MB)
-# - Si vous avez besoin de sentence-transformers localement, utilisez requirements.txt à la place
+# NOTE: On n'utilise PAS llama-index-llms-huggingface car il utilise l'ancienne API
+# Le wrapper personnalise HuggingFaceRouterLLM utilise directement huggingface_hub.InferenceClient
