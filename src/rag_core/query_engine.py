@@ -84,7 +84,7 @@ PROMPT_PATH = os.path.join(BASE_DIR, "prompts", "renovation_expert.txt")
 class HuggingFaceTextEmbeddingsWrapper(BaseEmbedding):
     """
     Wrapper personnalisé pour utiliser l'API Hugging Face embeddings
-    via le nouveau router.huggingface.co (corrige l'erreur 410 Gone)
+    via le nouveau router.huggingface.co (obligatoire depuis 2025)
     """
     def __init__(self, api_key: str, model_name: str = "intfloat/multilingual-e5-base"):
         try:
@@ -92,11 +92,9 @@ class HuggingFaceTextEmbeddingsWrapper(BaseEmbedding):
             self.requests = requests
             self.api_key = api_key
             self.model_name = model_name
-            # URLs à essayer dans l'ordre (nouveau router en priorité)
-            self.urls = [
-                f"https://router.huggingface.co/models/{model_name}",
-                f"https://api-inference.huggingface.co/models/{model_name}",
-            ]
+            # Utiliser UNIQUEMENT le nouveau router (l'ancienne API api-inference.huggingface.co est dépréciée depuis 2025)
+            # https://router.huggingface.co remplace https://api-inference.huggingface.co
+            self.url = f"https://router.huggingface.co/models/{model_name}"
             self.headers = {"Authorization": f"Bearer {api_key}"}
             # Appeler le constructeur parent
             super().__init__(model_name=model_name)
@@ -106,63 +104,70 @@ class HuggingFaceTextEmbeddingsWrapper(BaseEmbedding):
             raise RuntimeError(f"❌ Erreur lors de l'initialisation du wrapper : {e}")
     
     def _get_query_embedding(self, query: str) -> List[float]:
-        """Obtenir l'embedding d'une requête (synchrone)"""
+        """Obtenir l'embedding d'une requête (synchrone) via router.huggingface.co"""
+        # IMPORTANT: Pour multilingual-e5-base, ajouter le préfixe "query: " ou "passage: "
+        # Voir: https://huggingface.co/intfloat/multilingual-e5-base
+        # Pour les requêtes de recherche, on utilise "query: "
+        if not query.strip().startswith("query:") and not query.strip().startswith("passage:"):
+            query = f"query: {query}"
+        
         payload = {"inputs": query}
         
-        # Essayer chaque URL jusqu'à ce qu'une fonctionne
-        last_error = None
-        for url in self.urls:
-            try:
-                response = self.requests.post(
-                    url,
-                    headers=self.headers,
-                    json=payload,
-                    timeout=30
+        try:
+            response = self.requests.post(
+                self.url,
+                headers=self.headers,
+                json=payload,
+                timeout=30
+            )
+            
+            # Gérer les erreurs spécifiques
+            if response.status_code == 410:
+                raise RuntimeError(
+                    f"❌ L'endpoint {self.url} est déprécié (410 Gone). "
+                    f"Utilisez router.huggingface.co (déjà configuré). "
+                    f"Vérifiez que votre token API a les permissions nécessaires."
                 )
+            
+            response.raise_for_status()
+            data = response.json()
+            
+            # Parser la réponse (peut être une liste ou un dict)
+            if isinstance(data, list):
+                if len(data) > 0:
+                    # Si c'est une liste de listes, prendre le premier élément
+                    result = data[0] if isinstance(data[0], list) else data
+                    return [float(x) for x in result]
+                raise ValueError("Réponse vide")
+            elif isinstance(data, dict):
+                # Chercher les embeddings dans différentes clés possibles
+                for key in ["embeddings", "data", "embedding", "vector"]:
+                    if key in data:
+                        emb = data[key]
+                        if isinstance(emb, list) and len(emb) > 0:
+                            result = emb[0] if isinstance(emb[0], list) else emb
+                            return [float(x) for x in result]
+                raise ValueError(f"Format de réponse inattendu: {data}")
+            else:
+                # Réponse directe (array numpy ou similaire)
+                return [float(x) for x in data] if hasattr(data, '__iter__') else [float(data)]
                 
-                # Si 410 Gone, essayer l'URL suivante
-                if response.status_code == 410:
-                    last_error = f"410 Gone from {url}"
-                    continue
-                
-                response.raise_for_status()
-                data = response.json()
-                
-                # Parser la réponse (peut être une liste ou un dict)
-                if isinstance(data, list):
-                    if len(data) > 0:
-                        # Si c'est une liste de listes, prendre le premier élément
-                        result = data[0] if isinstance(data[0], list) else data
-                        return [float(x) for x in result]
-                    raise ValueError("Réponse vide")
-                elif isinstance(data, dict):
-                    # Chercher les embeddings dans différentes clés possibles
-                    for key in ["embeddings", "data", "embedding", "vector"]:
-                        if key in data:
-                            emb = data[key]
-                            if isinstance(emb, list) and len(emb) > 0:
-                                result = emb[0] if isinstance(emb[0], list) else emb
-                                return [float(x) for x in result]
-                    raise ValueError(f"Format de réponse inattendu: {data}")
-                else:
-                    # Réponse directe (array numpy ou similaire)
-                    return [float(x) for x in data] if hasattr(data, '__iter__') else [float(data)]
-                    
-            except self.requests.exceptions.RequestException as e:
-                last_error = e
-                # Si la réponse existe et ce n'est pas 410, continuer quand même
-                if hasattr(e, 'response') and e.response is not None:
-                    if e.response.status_code != 410:
-                        continue
-                # Sinon, essayer l'URL suivante
-                continue
-        
-        # Si toutes les URLs ont échoué, lever une erreur
-        raise RuntimeError(
-            f"❌ Impossible d'obtenir l'embedding depuis aucune URL. "
-            f"Dernière erreur: {last_error}. "
-            f"Modèle: {self.model_name}"
-        )
+        except self.requests.exceptions.RequestException as e:
+            error_msg = str(e)
+            if hasattr(e, 'response') and e.response is not None:
+                status_code = e.response.status_code
+                try:
+                    error_detail = e.response.json()
+                    error_msg = f"{error_msg} - {error_detail}"
+                except:
+                    error_msg = f"{error_msg} - Status: {status_code}"
+            
+            raise RuntimeError(
+                f"❌ Impossible d'obtenir l'embedding depuis {self.url}. "
+                f"Erreur: {error_msg}. "
+                f"Modèle: {self.model_name}. "
+                f"Vérifiez que votre token API est valide et a les permissions nécessaires."
+            )
     
     async def _aget_query_embedding(self, query: str) -> List[float]:
         """Obtenir l'embedding d'une requête (asynchrone)"""
