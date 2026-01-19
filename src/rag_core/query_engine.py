@@ -96,14 +96,14 @@ class HuggingFaceRouterLLM(CustomLLM):
     api_key: str = ""
     model_name: str = "Qwen/Qwen2.5-72B-Instruct"
     temperature: float = 0.1
-    max_new_tokens: int = 512
+    max_new_tokens: int = 2048  # Augmenté de 512 à 2048 pour des réponses plus longues
     
     def __init__(
         self,
         api_key: str,
         model_name: str = "Qwen/Qwen2.5-72B-Instruct",
         temperature: float = 0.1,
-        max_new_tokens: int = 512,
+        max_new_tokens: int = 2048,  # Augmenté de 512 à 2048 pour des réponses plus longues
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -424,11 +424,14 @@ class RenovationRAG:
             print(f"API Key : {api_key[:10]}...{api_key[-4:] if len(api_key) > 14 else '***'}")
             
             try:
+                # Augmenter max_new_tokens pour éviter les réponses tronquées
+                max_tokens = int(os.getenv("HUGGINGFACE_MAX_TOKENS", "2048"))
+                print(f"📊 Limite de tokens configurée : {max_tokens}")
                 self.llm = HuggingFaceRouterLLM(
                     api_key=api_key,
                     model_name=model_name,
                     temperature=0.1,
-                    max_new_tokens=512
+                    max_new_tokens=max_tokens
                 )
             except Exception as e:
                 raise RuntimeError(f"Erreur lors de l'initialisation du LLM Hugging Face : {e}\n"

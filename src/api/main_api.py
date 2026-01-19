@@ -179,16 +179,48 @@ print(f"📂 Chemin docs existe : {os.path.exists(DOCS_PATH)}")
 async def get_pdf(file_name: str):
     """Cherche et sert un PDF par son nom dans tous les sous-dossiers de docs"""
     import glob
+    from urllib.parse import unquote
     
     if not os.path.exists(DOCS_PATH):
         raise HTTPException(status_code=500, detail=f"Dossier docs non trouvé : {DOCS_PATH}")
     
+    # Décoder l'URL (gère les %20, %2E, etc.)
+    file_name = unquote(file_name)
+    
     # Nettoyer le nom du fichier (enlever les chemins relatifs malveillants)
     file_name = os.path.basename(file_name)
+    
+    print(f"🔍 Recherche du PDF : {file_name}")
     
     # Chercher le fichier dans tous les sous-dossiers
     search_pattern = os.path.join(DOCS_PATH, "**", file_name)
     matches = glob.glob(search_pattern, recursive=True)
+    
+    # Si pas de match exact, essayer une recherche insensible à la casse
+    if not matches:
+        print(f"⚠️ Pas de match exact, recherche insensible à la casse...")
+        for root, dirs, files in os.walk(DOCS_PATH):
+            for file in files:
+                if file.lower() == file_name.lower():
+                    matches.append(os.path.join(root, file))
+                    break
+    
+    # Si toujours pas de match, essayer de chercher avec des variations d'espaces
+    if not matches:
+        print(f"⚠️ Pas de match, recherche avec variations d'espaces...")
+        # Remplacer les espaces par des underscores et vice versa
+        variations = [
+            file_name.replace(' ', '_'),
+            file_name.replace('_', ' '),
+            file_name.replace('%20', ' '),
+            file_name.replace(' ', '%20'),
+        ]
+        for variation in variations:
+            if variation != file_name:
+                search_pattern = os.path.join(DOCS_PATH, "**", variation)
+                matches = glob.glob(search_pattern, recursive=True)
+                if matches:
+                    break
     
     if matches:
         # Prendre le premier match
@@ -203,6 +235,17 @@ async def get_pdf(file_name: str):
             )
     
     print(f"❌ PDF non trouvé : {file_name} dans {DOCS_PATH}")
+    # Lister quelques fichiers disponibles pour debug
+    try:
+        sample_files = []
+        for root, dirs, files in os.walk(DOCS_PATH):
+            for file in files[:5]:  # Limiter à 5 fichiers
+                if file.endswith('.pdf'):
+                    sample_files.append(file)
+        if sample_files:
+            print(f"📄 Exemples de fichiers disponibles : {', '.join(sample_files)}")
+    except:
+        pass
     raise HTTPException(status_code=404, detail=f"PDF non trouvé : {file_name}")
 
 # CORS pour permettre les requêtes depuis le backend
