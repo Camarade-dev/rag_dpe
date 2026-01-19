@@ -130,8 +130,8 @@ class HuggingFaceRouterLLM(CustomLLM):
             print(f"   Prompt trop long ({len(prompt)} chars), truncation...")
             prompt = prompt[:max_prompt_chars] + "..."
         
-        # URL du nouveau router avec endpoint chat/completions
-        url = f"https://router.huggingface.co/hf-inference/models/{self.model_name}/v1/chat/completions"
+        # URL du nouveau router (modele dans le body, pas dans l'URL)
+        url = "https://router.huggingface.co/v1/chat/completions"
         
         headers = {
             "Authorization": f"Bearer {self.api_key}",
