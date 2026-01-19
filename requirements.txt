@@ -43,6 +43,9 @@ uvicorn[standard]>=0.32.0
 # Hugging Face Hub (nécessaire pour l'Inference API et les embeddings API)
 huggingface-hub>=0.20.0
 
+# Requests (nécessaire pour le wrapper personnalisé d'embeddings)
+requests>=2.31.0
+
 # NOTE IMPORTANTE :
 # - Si USE_API_EMBEDDINGS=true : sentence-transformers ne sera PAS installé (économise torch, ~400 MB RAM)
 # - Si USE_API_EMBEDDINGS=false : sentence-transformers sera installé (nécessite torch)
