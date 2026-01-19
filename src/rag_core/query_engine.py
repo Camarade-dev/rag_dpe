@@ -1,6 +1,9 @@
 import sys
-import os  # <--- Ajouté pour lire le fichier
+import os
 import warnings
+import time
+import requests
+
 # Désactiver les warnings non-critiques
 warnings.filterwarnings("ignore", category=UserWarning)
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
@@ -15,11 +18,13 @@ logging.getLogger("chromadb.telemetry").setLevel(logging.CRITICAL)
 
 from llama_index.core import VectorStoreIndex, StorageContext, Settings, PromptTemplate
 from llama_index.core.embeddings import BaseEmbedding
+from llama_index.core.llms import CustomLLM, CompletionResponse, LLMMetadata
+from llama_index.core.llms.callbacks import llm_completion_callback
 from llama_index.vector_stores.chroma import ChromaVectorStore
 # Ne pas importer HuggingFaceEmbedding ici (charge torch) - import conditionnel dans _init_embedding
 import chromadb
 import asyncio
-from typing import List, Optional
+from typing import List, Optional, Any, Generator
 
 # Import conditionnel des LLMs externes avec gestion d'erreurs robuste
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai").lower()  # openai, huggingface, anthropic, ollama
@@ -79,6 +84,123 @@ DB_PATH = os.getenv("CHROMA_DB_PATH", os.path.join(BASE_DIR, "data", "chroma_db"
 MODEL_PATH = os.getenv("LLM_MODEL_PATH", os.path.join(BASE_DIR, "data", "llm_models", "mistral-7b-instruct-v0.2.Q4_K_M.gguf"))
 COLLECTION_NAME = "renovation_knowledge"
 PROMPT_PATH = os.path.join(BASE_DIR, "prompts", "renovation_expert.txt")
+
+
+class HuggingFaceRouterLLM(CustomLLM):
+    """
+    Wrapper LLM personnalisé pour Hugging Face utilisant le nouveau router.huggingface.co
+    L'ancienne API api-inference.huggingface.co est dépréciée (erreur 410 Gone)
+    """
+    
+    api_key: str = ""
+    model_name: str = "mistralai/Mistral-7B-Instruct-v0.3"
+    temperature: float = 0.1
+    max_new_tokens: int = 512
+    _url: str = ""
+    _headers: dict = {}
+    
+    def __init__(
+        self,
+        api_key: str,
+        model_name: str = "mistralai/Mistral-7B-Instruct-v0.3",
+        temperature: float = 0.1,
+        max_new_tokens: int = 512,
+        **kwargs
+    ):
+        super().__init__(**kwargs)
+        self.api_key = api_key
+        self.model_name = model_name
+        self.temperature = temperature
+        self.max_new_tokens = max_new_tokens
+        # Utiliser le nouveau router.huggingface.co
+        self._url = f"https://router.huggingface.co/hf-inference/models/{model_name}"
+        self._headers = {"Authorization": f"Bearer {api_key}"}
+    
+    @property
+    def metadata(self) -> LLMMetadata:
+        return LLMMetadata(
+            context_window=4096,
+            num_output=self.max_new_tokens,
+            model_name=self.model_name,
+            is_chat_model=True
+        )
+    
+    def _call_api(self, prompt: str, max_retries: int = 3) -> str:
+        """Appelle l'API Hugging Face avec retries"""
+        payload = {
+            "inputs": prompt,
+            "parameters": {
+                "max_new_tokens": self.max_new_tokens,
+                "temperature": self.temperature,
+                "return_full_text": False,
+                "do_sample": self.temperature > 0
+            }
+        }
+        
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                response = requests.post(
+                    self._url,
+                    headers=self._headers,
+                    json=payload,
+                    timeout=120
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    # Format de réponse: [{"generated_text": "..."}]
+                    if isinstance(data, list) and len(data) > 0:
+                        return data[0].get("generated_text", "")
+                    elif isinstance(data, dict):
+                        return data.get("generated_text", str(data))
+                    return str(data)
+                
+                elif response.status_code == 503:
+                    # Modèle en chargement
+                    wait_time = min(5 * (attempt + 1), 30)
+                    print(f"   ⏳ Modèle en chargement, attente {wait_time}s...")
+                    time.sleep(wait_time)
+                    continue
+                
+                elif response.status_code == 500:
+                    # Erreur serveur
+                    wait_time = min(3 * (attempt + 1), 15)
+                    print(f"   ⚠️ Erreur serveur 500, retry dans {wait_time}s...")
+                    time.sleep(wait_time)
+                    continue
+                
+                else:
+                    response.raise_for_status()
+                    
+            except requests.exceptions.Timeout:
+                wait_time = min(5 * (attempt + 1), 20)
+                print(f"   ⏱️ Timeout, retry dans {wait_time}s...")
+                time.sleep(wait_time)
+                last_error = "Timeout"
+                continue
+                
+            except Exception as e:
+                last_error = str(e)
+                if attempt < max_retries - 1:
+                    time.sleep(3)
+                    continue
+                raise
+        
+        raise RuntimeError(f"Échec après {max_retries} tentatives: {last_error}")
+    
+    @llm_completion_callback()
+    def complete(self, prompt: str, **kwargs) -> CompletionResponse:
+        """Génère une réponse complète"""
+        text = self._call_api(prompt)
+        return CompletionResponse(text=text)
+    
+    @llm_completion_callback()
+    def stream_complete(self, prompt: str, **kwargs) -> Generator[CompletionResponse, None, None]:
+        """Streaming non supporté - retourne la réponse complète"""
+        # Le streaming n'est pas bien supporté par l'API, on fait une réponse complète
+        text = self._call_api(prompt)
+        yield CompletionResponse(text=text, delta=text)
 
 
 class HuggingFaceTextEmbeddingsWrapper(BaseEmbedding):
@@ -249,53 +371,30 @@ class RenovationRAG:
             
         elif provider == "huggingface":
             api_key = os.getenv("HUGGINGFACE_API_KEY")
-            model_name = os.getenv("HUGGINGFACE_MODEL", "mistralai/Mixtral-8x7B-Instruct-v0.1")
+            # Utiliser Mistral-7B-Instruct-v0.3 par défaut (plus léger et disponible sur l'API)
+            # Mixtral-8x7B peut ne plus être disponible sur l'API gratuite
+            model_name = os.getenv("HUGGINGFACE_MODEL", "mistralai/Mistral-7B-Instruct-v0.3")
             
             if not api_key:
-                raise ValueError("❌ HUGGINGFACE_API_KEY non définie. Configurez-la dans les variables d'environnement pour utiliser l'API Inference (gratuit et sans RAM).")
+                raise ValueError("❌ HUGGINGFACE_API_KEY non définie. Configurez-la dans les variables d'environnement.")
             
-            if HuggingFaceInferenceAPI is not None:
-                if _USE_NEW_HF_LLM_API:
-                    print("📦 Utilisation de llama-index-llms-huggingface-api (nouvelle API)")
-                else:
-                    print("⚠️  Utilisation de llama-index-llms-huggingface (ancienne API, dépréciée)")
-                print(f"🤖 Utilisation de Hugging Face Inference API : {model_name}")
-                print(f"🔑 API Key détectée : {api_key[:10]}...{api_key[-4:] if len(api_key) > 14 else '***'}")
-                try:
-                    # Les nouvelles classes utilisent 'model_name' et 'token' (ou 'api_key' selon la version)
-                    # Essayons d'abord avec 'model_name' et 'token' (nouvelle API)
-                    try:
-                        self.llm = HuggingFaceInferenceAPI(
-                            model_name=model_name,
-                            token=api_key,
-                            temperature=0.1,
-                            max_new_tokens=256  # Réduit pour accélérer et économiser les tokens API
-                        )
-                    except TypeError:
-                        # Si ça ne marche pas, essayons avec 'api_key' (ancienne API)
-                        self.llm = HuggingFaceInferenceAPI(
-                            model_name=model_name,
-                            api_key=api_key,
-                            temperature=0.1,
-                            max_new_tokens=256
-                        )
-                except Exception as e:
-                    raise RuntimeError(f"❌ Erreur lors de l'initialisation de Hugging Face Inference API : {e}\n"
-                                     f"💡 Vérifiez que votre clé API est valide et que le modèle {model_name} est accessible.\n"
-                                     f"💡 Assurez-vous que llama-index-llms-huggingface-api est installé.")
-            elif HuggingFaceLLM is not None:
-                # Fallback vers modèle local Hugging Face (nécessite plus de RAM)
-                print(f"⚠️  HuggingFaceInferenceAPI non disponible, utilisation du modèle local : {model_name}")
-                print("⚠️  ATTENTION: Le modèle sera chargé localement (nécessite beaucoup de RAM)")
-                self.llm = HuggingFaceLLM(
+            # IMPORTANT: Utiliser notre wrapper personnalisé qui utilise router.huggingface.co
+            # L'ancienne API api-inference.huggingface.co est dépréciée (erreur 410 Gone)
+            print("📦 Utilisation du wrapper personnalisé HuggingFaceRouterLLM")
+            print(f"🤖 Modèle LLM : {model_name}")
+            print(f"🌐 URL : router.huggingface.co (nouvelle API)")
+            print(f"🔑 API Key : {api_key[:10]}...{api_key[-4:] if len(api_key) > 14 else '***'}")
+            
+            try:
+                self.llm = HuggingFaceRouterLLM(
+                    api_key=api_key,
                     model_name=model_name,
                     temperature=0.1,
-                    max_new_tokens=1024,
-                    context_window=4096
+                    max_new_tokens=512
                 )
-            else:
-                raise ImportError("❌ Package llama-index-llms-huggingface-api non installé.\n"
-                                "💡 Installez-le avec: pip install llama-index-llms-huggingface-api huggingface-hub")
+            except Exception as e:
+                raise RuntimeError(f"❌ Erreur lors de l'initialisation du LLM Hugging Face : {e}\n"
+                                 f"💡 Vérifiez que votre clé API est valide et que le modèle {model_name} est accessible.")
                 
         elif provider == "anthropic":
             if Anthropic is None:
