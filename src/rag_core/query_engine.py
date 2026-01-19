@@ -122,85 +122,187 @@ class HuggingFaceRouterLLM(CustomLLM):
             context_window=4096,
             num_output=self.max_new_tokens,
             model_name=self.model_name,
-            is_chat_model=True
+            is_chat_model=False  # Changé à False pour éviter les problèmes de chat
         )
     
-    def _call_api(self, prompt: str, max_retries: int = 3) -> str:
-        """Appelle l'API Hugging Face avec retries"""
+    def _call_api(self, prompt: str, max_retries: int = 5) -> str:
+        """Appelle l'API Hugging Face avec retries robustes"""
+        # Limiter la taille du prompt pour éviter les erreurs
+        max_prompt_chars = 8000  # ~2000 tokens environ
+        if len(prompt) > max_prompt_chars:
+            print(f"   ⚠️ Prompt trop long ({len(prompt)} chars), truncation à {max_prompt_chars}")
+            prompt = prompt[:max_prompt_chars] + "..."
+        
         payload = {
             "inputs": prompt,
             "parameters": {
                 "max_new_tokens": self.max_new_tokens,
-                "temperature": self.temperature,
+                "temperature": max(0.01, self.temperature),  # Éviter temperature=0
                 "return_full_text": False,
-                "do_sample": self.temperature > 0
+                "do_sample": True
             }
         }
         
         last_error = None
+        last_status = None
+        
         for attempt in range(max_retries):
             try:
+                print(f"   🔄 Appel LLM (tentative {attempt + 1}/{max_retries})...")
                 response = requests.post(
                     self._url,
                     headers=self._headers,
                     json=payload,
-                    timeout=120
+                    timeout=180  # 3 minutes timeout
                 )
+                
+                last_status = response.status_code
                 
                 if response.status_code == 200:
                     data = response.json()
                     # Format de réponse: [{"generated_text": "..."}]
                     if isinstance(data, list) and len(data) > 0:
-                        return data[0].get("generated_text", "")
+                        text = data[0].get("generated_text", "")
+                        if text:
+                            print(f"   ✅ Réponse LLM reçue ({len(text)} caractères)")
+                            return text
                     elif isinstance(data, dict):
-                        return data.get("generated_text", str(data))
-                    return str(data)
+                        text = data.get("generated_text", "")
+                        if text:
+                            return text
+                        # Peut être une erreur dans le format dict
+                        if "error" in data:
+                            raise RuntimeError(f"API error: {data['error']}")
+                    # Réponse vide ou format inattendu
+                    print(f"   ⚠️ Réponse vide ou format inattendu: {str(data)[:200]}")
+                    last_error = "Réponse vide"
+                    continue
                 
                 elif response.status_code == 503:
                     # Modèle en chargement
-                    wait_time = min(5 * (attempt + 1), 30)
-                    print(f"   ⏳ Modèle en chargement, attente {wait_time}s...")
+                    try:
+                        error_data = response.json()
+                        estimated_time = error_data.get("estimated_time", 30)
+                    except:
+                        estimated_time = 30
+                    wait_time = min(estimated_time + 5, 60)
+                    print(f"   ⏳ Modèle en chargement (503), attente {wait_time}s...")
                     time.sleep(wait_time)
+                    last_error = "503 - Modèle en chargement"
                     continue
                 
                 elif response.status_code == 500:
-                    # Erreur serveur
-                    wait_time = min(3 * (attempt + 1), 15)
-                    print(f"   ⚠️ Erreur serveur 500, retry dans {wait_time}s...")
+                    # Erreur serveur interne
+                    wait_time = min(10 * (attempt + 1), 60)
+                    try:
+                        error_text = response.text[:200]
+                    except:
+                        error_text = "Unknown"
+                    print(f"   ⚠️ Erreur serveur 500: {error_text}, retry dans {wait_time}s...")
                     time.sleep(wait_time)
+                    last_error = f"500 - {error_text}"
                     continue
                 
+                elif response.status_code == 422:
+                    # Erreur de validation - prompt trop long ou mal formé
+                    try:
+                        error_data = response.json()
+                        error_msg = str(error_data)[:300]
+                    except:
+                        error_msg = response.text[:300]
+                    print(f"   ❌ Erreur de validation (422): {error_msg}")
+                    # Réduire le prompt et réessayer
+                    if len(prompt) > 2000:
+                        prompt = prompt[:2000] + "..."
+                        payload["inputs"] = prompt
+                        last_error = f"422 - Validation error, retrying with shorter prompt"
+                        continue
+                    raise RuntimeError(f"Erreur de validation API: {error_msg}")
+                
+                elif response.status_code == 429:
+                    # Rate limiting
+                    wait_time = min(30 * (attempt + 1), 120)
+                    print(f"   🚫 Rate limit (429), attente {wait_time}s...")
+                    time.sleep(wait_time)
+                    last_error = "429 - Rate limited"
+                    continue
+                
+                elif response.status_code == 404:
+                    # Modèle non trouvé
+                    raise RuntimeError(
+                        f"❌ Modèle '{self.model_name}' non trouvé (404). "
+                        f"Vérifiez que le modèle existe sur Hugging Face et est accessible via l'API Inference."
+                    )
+                
                 else:
+                    try:
+                        error_text = response.text[:300]
+                    except:
+                        error_text = f"Status {response.status_code}"
+                    print(f"   ❌ Erreur HTTP {response.status_code}: {error_text}")
+                    last_error = f"{response.status_code} - {error_text}"
+                    if attempt < max_retries - 1:
+                        time.sleep(5)
+                        continue
                     response.raise_for_status()
                     
             except requests.exceptions.Timeout:
-                wait_time = min(5 * (attempt + 1), 20)
-                print(f"   ⏱️ Timeout, retry dans {wait_time}s...")
+                wait_time = min(15 * (attempt + 1), 60)
+                print(f"   ⏱️ Timeout (180s), retry dans {wait_time}s...")
                 time.sleep(wait_time)
                 last_error = "Timeout"
                 continue
                 
+            except requests.exceptions.ConnectionError as e:
+                wait_time = min(10 * (attempt + 1), 30)
+                print(f"   🔌 Erreur connexion: {e}, retry dans {wait_time}s...")
+                time.sleep(wait_time)
+                last_error = f"Connection error: {e}"
+                continue
+                
+            except RuntimeError:
+                raise  # Re-raise RuntimeError directement
+                
             except Exception as e:
                 last_error = str(e)
+                print(f"   ❌ Exception inattendue: {e}")
                 if attempt < max_retries - 1:
-                    time.sleep(3)
+                    time.sleep(5)
                     continue
-                raise
+                raise RuntimeError(f"Erreur LLM: {e}")
         
-        raise RuntimeError(f"Échec après {max_retries} tentatives: {last_error}")
+        raise RuntimeError(
+            f"❌ Échec après {max_retries} tentatives. "
+            f"Dernier status: {last_status}. "
+            f"Dernière erreur: {last_error}. "
+            f"Modèle: {self.model_name}"
+        )
     
     @llm_completion_callback()
     def complete(self, prompt: str, **kwargs) -> CompletionResponse:
         """Génère une réponse complète"""
-        text = self._call_api(prompt)
-        return CompletionResponse(text=text)
+        try:
+            text = self._call_api(prompt)
+            return CompletionResponse(text=text)
+        except Exception as e:
+            print(f"   ❌ Erreur dans complete(): {e}")
+            # Retourner une réponse d'erreur plutôt que de planter
+            return CompletionResponse(
+                text=f"Désolé, je n'ai pas pu générer une réponse. Erreur: {str(e)[:200]}"
+            )
     
     @llm_completion_callback()
     def stream_complete(self, prompt: str, **kwargs) -> Generator[CompletionResponse, None, None]:
         """Streaming non supporté - retourne la réponse complète"""
-        # Le streaming n'est pas bien supporté par l'API, on fait une réponse complète
-        text = self._call_api(prompt)
-        yield CompletionResponse(text=text, delta=text)
+        try:
+            text = self._call_api(prompt)
+            yield CompletionResponse(text=text, delta=text)
+        except Exception as e:
+            print(f"   ❌ Erreur dans stream_complete(): {e}")
+            yield CompletionResponse(
+                text=f"Désolé, je n'ai pas pu générer une réponse. Erreur: {str(e)[:200]}",
+                delta=f"Erreur: {str(e)[:100]}"
+            )
 
 
 class HuggingFaceTextEmbeddingsWrapper(BaseEmbedding):
