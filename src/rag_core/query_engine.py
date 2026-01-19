@@ -458,7 +458,32 @@ class RenovationRAG:
             db = chromadb.PersistentClient(path=DB_PATH)
             print("✅ Client ChromaDB créé")
             
-            chroma_collection = db.get_or_create_collection(COLLECTION_NAME)
+            # Créer la collection avec une embedding function vide
+            # On utilise les embeddings de llama-index, pas ceux de ChromaDB
+            # Mais ChromaDB nécessite une embedding function pour initialiser la collection
+            try:
+                # Essayer avec embedding_function=None (certaines versions le supportent)
+                chroma_collection = db.get_or_create_collection(
+                    COLLECTION_NAME,
+                    embedding_function=None
+                )
+            except (TypeError, ValueError):
+                # Si None n'est pas accepté, utiliser une embedding function vide
+                # qui ne sera jamais appelée car llama-index gère les embeddings
+                class EmptyEmbeddingFunction:
+                    def __call__(self, input):
+                        # Ne devrait jamais être appelée car llama-index gère les embeddings
+                        raise NotImplementedError("Cette embedding function ne doit pas être utilisée")
+                
+                try:
+                    chroma_collection = db.get_or_create_collection(
+                        COLLECTION_NAME,
+                        embedding_function=EmptyEmbeddingFunction()
+                    )
+                except Exception:
+                    # Dernier recours : créer sans embedding function explicite
+                    # Cela utilisera DefaultEmbeddingFunction mais on a installé onnxruntime
+                    chroma_collection = db.get_or_create_collection(COLLECTION_NAME)
             print(f"✅ Collection '{COLLECTION_NAME}' créée/récupérée")
             
             vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
