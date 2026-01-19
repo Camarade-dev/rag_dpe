@@ -63,6 +63,6 @@ services:
       - key: AUTO_INGEST_ON_STARTUP
         value: "true"  # Indexer automatiquement les documents au démarrage si ChromaDB est vide
       - key: INGESTION_MAX_DOCS
-        value: "100"  # Nombre max de documents à indexer au démarrage (augmenter après test)
+        value: "30"  # Nombre max de documents (réduit pour éviter les erreurs 500 HuggingFace)
 
 

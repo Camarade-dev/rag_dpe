@@ -84,9 +84,10 @@ def check_and_ingest_if_needed():
             from ingest_api import ingest_documents
             
             # Lancer l'ingestion avec un nombre limité de documents pour le premier démarrage
-            # (on peut augmenter après le premier déploiement réussi)
-            max_docs = int(os.getenv("INGESTION_MAX_DOCS", "50"))  # Limite par défaut
+            # Réduit à 30 par défaut pour éviter les timeouts et erreurs API
+            max_docs = int(os.getenv("INGESTION_MAX_DOCS", "30"))
             print(f"📄 Ingestion limitée à {max_docs} documents maximum")
+            print(f"⚠️ L'ingestion utilise des retries robustes (peut prendre 5-10 min)")
             
             success = ingest_documents(force=False, max_docs=max_docs)
             
