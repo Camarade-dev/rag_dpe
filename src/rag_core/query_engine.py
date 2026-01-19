@@ -89,18 +89,21 @@ class HuggingFaceTextEmbeddingsWrapper(BaseEmbedding):
     def __init__(self, api_key: str, model_name: str = "intfloat/multilingual-e5-base"):
         try:
             import requests
-            self.requests = requests
-            self.api_key = api_key
-            self.model_name = model_name
+            # Vérifier que requests est disponible
+            if not hasattr(requests, 'post'):
+                raise ImportError("❌ requests n'est pas correctement installé")
+            
+            # Appeler le constructeur parent d'abord
+            super().__init__(model_name=model_name)
+            
             # Utiliser UNIQUEMENT le nouveau router (l'ancienne API api-inference.huggingface.co est dépréciée depuis 2025)
             # Format correct: https://router.huggingface.co/hf-inference/models/{model}/pipeline/feature-extraction
-            self.url = f"https://router.huggingface.co/hf-inference/models/{model_name}/pipeline/feature-extraction"
-            self.model_name = model_name
-            self.headers = {
+            # Assigner les attributs après l'initialisation du parent
+            object.__setattr__(self, 'api_key', api_key)
+            object.__setattr__(self, 'url', f"https://router.huggingface.co/hf-inference/models/{model_name}/pipeline/feature-extraction")
+            object.__setattr__(self, 'headers', {
                 "Authorization": f"Bearer {api_key}"
-            }
-            # Appeler le constructeur parent
-            super().__init__(model_name=model_name)
+            })
         except ImportError:
             raise ImportError("❌ requests n'est pas installé. Installez-le avec: pip install requests")
         except Exception as e:
@@ -108,6 +111,8 @@ class HuggingFaceTextEmbeddingsWrapper(BaseEmbedding):
     
     def _get_query_embedding(self, query: str) -> List[float]:
         """Obtenir l'embedding d'une requête (synchrone) via router.huggingface.co"""
+        import requests
+        
         # IMPORTANT: Pour multilingual-e5-base, ajouter le préfixe "query: " ou "passage: "
         # Voir: https://huggingface.co/intfloat/multilingual-e5-base
         # Pour les requêtes de recherche, on utilise "query: "
@@ -120,7 +125,7 @@ class HuggingFaceTextEmbeddingsWrapper(BaseEmbedding):
         }
         
         try:
-            response = self.requests.post(
+            response = requests.post(
                 self.url,
                 headers=self.headers,
                 json=payload,
@@ -159,7 +164,7 @@ class HuggingFaceTextEmbeddingsWrapper(BaseEmbedding):
                 # Réponse directe (array numpy ou similaire)
                 return [float(x) for x in data] if hasattr(data, '__iter__') else [float(data)]
                 
-        except self.requests.exceptions.RequestException as e:
+        except requests.exceptions.RequestException as e:
             error_msg = str(e)
             if hasattr(e, 'response') and e.response is not None:
                 status_code = e.response.status_code
@@ -383,6 +388,7 @@ class RenovationRAG:
                 print(f"📦 Modèle d'embedding: {embedding_model_name}")
                 
                 # PRIORITÉ 1: Utiliser notre wrapper personnalisé (corrige l'erreur 410 Gone)
+                # Le wrapper utilise router.huggingface.co (nouvelle API obligatoire depuis 2025)
                 print("📦 Utilisation du wrapper personnalisé HuggingFaceTextEmbeddingsWrapper (nouvelle API router.huggingface.co)")
                 try:
                     self.embed_model = HuggingFaceTextEmbeddingsWrapper(
@@ -391,11 +397,19 @@ class RenovationRAG:
                     )
                     print("✅ Embeddings via API Hugging Face (wrapper personnalisé, pas de modèle en mémoire, économise ~400 MB RAM)")
                 except Exception as e:
-                    print(f"⚠️  Le wrapper personnalisé a échoué: {e}")
-                    print("🔄 Tentative avec les classes llama-index...")
+                    print(f"❌ Le wrapper personnalisé a échoué: {e}")
+                    print("⚠️  Les classes llama-index utilisent encore l'ancienne API (410 Gone)")
+                    print("💡 Le wrapper personnalisé est nécessaire pour utiliser router.huggingface.co")
+                    # Ne pas utiliser le fallback vers llama-index car il utilise l'ancienne URL
+                    raise RuntimeError(
+                        f"❌ Impossible d'initialiser les embeddings avec le wrapper personnalisé: {e}\n"
+                        f"💡 Le wrapper utilise router.huggingface.co (nouvelle API obligatoire)\n"
+                        f"💡 Vérifiez que requests est installé: pip install requests"
+                    )
                     
+                    # DÉSACTIVÉ: Ne pas utiliser llama-index car il utilise l'ancienne API (410 Gone)
                     # PRIORITÉ 2: Essayer les classes llama-index si disponibles
-                    if HuggingFaceInferenceAPIEmbedding is not None:
+                    if False and HuggingFaceInferenceAPIEmbedding is not None:
                         if use_new_embedding_api:
                             print("📦 Utilisation de llama-index-embeddings-huggingface-api (nouvelle API)")
                         else:
