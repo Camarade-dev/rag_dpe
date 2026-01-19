@@ -551,9 +551,17 @@ class RenovationRAG:
             # ---------------------------------------------
 
             print("🔧 Configuration du query engine...")
+            
+            # IMPORTANT: Désactiver le streaming pour Hugging Face Inference API
+            # car il ne supporte pas stream_complete()
+            provider = LLM_PROVIDER
+            use_streaming = provider not in ["huggingface"]  # Streaming désactivé pour HF
+            print(f"📊 LLM Provider: {provider}")
+            print(f"📊 Streaming: {'activé' if use_streaming else 'désactivé (non supporté par HuggingFace API)'}")
+            
             self.query_engine = index.as_query_engine(
                 text_qa_template=qa_template,
-                streaming=True,
+                streaming=use_streaming,
                 similarity_top_k=2  # Réduit à 2 pour accélérer (était 3)
             )
             print("✅ Query engine configuré")
