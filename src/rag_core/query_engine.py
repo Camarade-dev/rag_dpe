@@ -93,9 +93,12 @@ class HuggingFaceTextEmbeddingsWrapper(BaseEmbedding):
             self.api_key = api_key
             self.model_name = model_name
             # Utiliser UNIQUEMENT le nouveau router (l'ancienne API api-inference.huggingface.co est dépréciée depuis 2025)
-            # https://router.huggingface.co remplace https://api-inference.huggingface.co
-            self.url = f"https://router.huggingface.co/models/{model_name}"
-            self.headers = {"Authorization": f"Bearer {api_key}"}
+            # Format correct: https://router.huggingface.co/hf-inference/models/{model}/pipeline/feature-extraction
+            self.url = f"https://router.huggingface.co/hf-inference/models/{model_name}/pipeline/feature-extraction"
+            self.model_name = model_name
+            self.headers = {
+                "Authorization": f"Bearer {api_key}"
+            }
             # Appeler le constructeur parent
             super().__init__(model_name=model_name)
         except ImportError:
@@ -111,7 +114,10 @@ class HuggingFaceTextEmbeddingsWrapper(BaseEmbedding):
         if not query.strip().startswith("query:") and not query.strip().startswith("passage:"):
             query = f"query: {query}"
         
-        payload = {"inputs": query}
+        # Format correct pour router.huggingface.co/hf-inference/models/.../pipeline/feature-extraction
+        payload = {
+            "inputs": query  # Texte simple (pas une liste)
+        }
         
         try:
             response = self.requests.post(
@@ -132,22 +138,23 @@ class HuggingFaceTextEmbeddingsWrapper(BaseEmbedding):
             response.raise_for_status()
             data = response.json()
             
-            # Parser la réponse (peut être une liste ou un dict)
+            # Parser la réponse (format router.huggingface.co: [[...]] ou [...])
             if isinstance(data, list):
+                # Format standard: liste de listes ou liste directe
                 if len(data) > 0:
                     # Si c'est une liste de listes, prendre le premier élément
-                    result = data[0] if isinstance(data[0], list) else data
-                    return [float(x) for x in result]
+                    embedding = data[0] if isinstance(data[0], list) else data
+                    return [float(x) for x in embedding]
                 raise ValueError("Réponse vide")
             elif isinstance(data, dict):
-                # Chercher les embeddings dans différentes clés possibles
+                # Chercher dans différentes clés possibles (fallback)
                 for key in ["embeddings", "data", "embedding", "vector"]:
                     if key in data:
                         emb = data[key]
                         if isinstance(emb, list) and len(emb) > 0:
                             result = emb[0] if isinstance(emb[0], list) else emb
                             return [float(x) for x in result]
-                raise ValueError(f"Format de réponse inattendu: {data}")
+                raise ValueError(f"Format de réponse inattendu: {list(data.keys())}")
             else:
                 # Réponse directe (array numpy ou similaire)
                 return [float(x) for x in data] if hasattr(data, '__iter__') else [float(data)]

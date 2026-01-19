@@ -56,6 +56,7 @@ requests>=2.31.0
 
 # NOTE IMPORTANTE :
 # - sentence-transformers est EXCLU (économise torch, ~400 MB RAM)
-# - Les embeddings utilisent l'API Hugging Face (USE_API_EMBEDDINGS=true)
-# - Les nouvelles classes (huggingface-api) corrigent l'erreur 410 Gone et les warnings de dépréciation
+# - Les embeddings utilisent l'API Hugging Face via router.huggingface.co (USE_API_EMBEDDINGS=true)
+# - Le wrapper personnalisé utilise: https://router.huggingface.co/hf-inference/models/{model}/pipeline/feature-extraction
+# - onnxruntime est nécessaire pour ChromaDB (conservé, ~50 MB)
 # - Si vous avez besoin de sentence-transformers localement, utilisez requirements.txt à la place
