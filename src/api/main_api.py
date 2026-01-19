@@ -33,6 +33,84 @@ from pdf_generator import parse_building_info, parse_rag_response, generate_reno
 # Initialiser le RAG une seule fois au démarrage
 rag_engine = None
 
+def check_and_ingest_if_needed():
+    """
+    Vérifie si la collection ChromaDB est vide et lance l'ingestion si nécessaire.
+    Retourne True si l'ingestion a été effectuée ou si des documents existent déjà.
+    """
+    import chromadb
+    
+    db_path = os.getenv("CHROMA_DB_PATH", "/tmp/chroma_db")
+    collection_name = "renovation_knowledge"
+    
+    print(f"🔍 Vérification de la base ChromaDB : {db_path}")
+    
+    try:
+        # Créer le dossier si nécessaire
+        os.makedirs(db_path, exist_ok=True)
+        
+        # Vérifier si la collection existe et contient des documents
+        db = chromadb.PersistentClient(path=db_path)
+        try:
+            collection = db.get_collection(collection_name)
+            count = collection.count()
+            print(f"📊 Collection '{collection_name}' contient {count} documents")
+            
+            if count > 0:
+                print("✅ Des documents existent déjà, pas besoin d'ingestion")
+                return True
+        except Exception as e:
+            print(f"⚠️ Collection non trouvée ou erreur : {e}")
+            count = 0
+        
+        # Si la collection est vide, lancer l'ingestion
+        print("\n" + "=" * 60)
+        print("⚠️ COLLECTION VIDE - LANCEMENT DE L'INGESTION AUTOMATIQUE")
+        print("=" * 60)
+        
+        # Vérifier si le dossier docs existe
+        docs_path = os.path.join(BASE_DIR, "docs")
+        if not os.path.exists(docs_path):
+            print(f"❌ Dossier documents introuvable : {docs_path}")
+            print("💡 L'API fonctionnera mais sans documents de contexte")
+            return False
+        
+        # Importer et lancer l'ingestion
+        try:
+            # Ajouter le chemin pour l'import
+            ingestion_path = os.path.join(os.path.dirname(__file__), "..", "ingestion")
+            sys.path.insert(0, ingestion_path)
+            
+            from ingest_api import ingest_documents
+            
+            # Lancer l'ingestion avec un nombre limité de documents pour le premier démarrage
+            # (on peut augmenter après le premier déploiement réussi)
+            max_docs = int(os.getenv("INGESTION_MAX_DOCS", "50"))  # Limite par défaut
+            print(f"📄 Ingestion limitée à {max_docs} documents maximum")
+            
+            success = ingest_documents(force=False, max_docs=max_docs)
+            
+            if success:
+                print("✅ Ingestion automatique terminée avec succès")
+                return True
+            else:
+                print("❌ Échec de l'ingestion automatique")
+                return False
+                
+        except ImportError as e:
+            print(f"❌ Module d'ingestion non trouvé : {e}")
+            return False
+        except Exception as e:
+            print(f"❌ Erreur lors de l'ingestion : {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+            
+    except Exception as e:
+        print(f"❌ Erreur lors de la vérification ChromaDB : {e}")
+        return False
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Gestion du cycle de vie de l'application"""
@@ -52,6 +130,14 @@ async def lifespan(app: FastAPI):
             print(f"⚠️  AVERTISSEMENT: torch est installé (version {torch.__version__}) - cela utilise ~400 MB RAM")
         except ImportError:
             print("✅ torch n'est pas installé - bonne configuration pour économiser la RAM")
+        
+        # NOUVEAU: Vérifier et indexer les documents si nécessaire
+        auto_ingest = os.getenv("AUTO_INGEST_ON_STARTUP", "true").lower() == "true"
+        if auto_ingest:
+            print("\n🔄 Vérification de l'ingestion des documents...")
+            check_and_ingest_if_needed()
+        else:
+            print("\n⚠️ AUTO_INGEST_ON_STARTUP=false - pas d'ingestion automatique")
         
         print("\n🚀 Démarrage de l'initialisation du RAG...")
         rag_engine = RenovationRAG()
@@ -148,6 +234,122 @@ class RAGResponse(BaseModel):
 async def root():
     """Health check"""
     return {"ok": True, "message": "API RAG Rénovation opérationnelle"}
+
+
+@app.get("/status")
+async def status():
+    """
+    Retourne l'état détaillé de l'API et de la base de données
+    """
+    import chromadb
+    
+    status_info = {
+        "ok": True,
+        "rag_initialized": rag_engine is not None,
+        "environment": {
+            "USE_API_EMBEDDINGS": os.getenv("USE_API_EMBEDDINGS", "non définie"),
+            "LLM_PROVIDER": os.getenv("LLM_PROVIDER", "non définie"),
+            "HUGGINGFACE_API_KEY": "✅ configurée" if os.getenv("HUGGINGFACE_API_KEY") else "❌ non configurée",
+            "CHROMA_DB_PATH": os.getenv("CHROMA_DB_PATH", "/tmp/chroma_db"),
+            "AUTO_INGEST_ON_STARTUP": os.getenv("AUTO_INGEST_ON_STARTUP", "true"),
+        },
+        "chromadb": {},
+        "docs_folder": {}
+    }
+    
+    # Vérifier ChromaDB
+    db_path = os.getenv("CHROMA_DB_PATH", "/tmp/chroma_db")
+    try:
+        db = chromadb.PersistentClient(path=db_path)
+        collection = db.get_collection("renovation_knowledge")
+        status_info["chromadb"] = {
+            "path": db_path,
+            "collection": "renovation_knowledge",
+            "document_count": collection.count(),
+            "status": "✅ connecté"
+        }
+    except Exception as e:
+        status_info["chromadb"] = {
+            "path": db_path,
+            "status": f"❌ erreur: {str(e)}"
+        }
+    
+    # Vérifier le dossier docs
+    docs_path = os.path.join(BASE_DIR, "docs")
+    try:
+        if os.path.exists(docs_path):
+            # Compter les fichiers PDF récursivement
+            pdf_count = 0
+            for root, dirs, files in os.walk(docs_path):
+                pdf_count += len([f for f in files if f.endswith('.pdf')])
+            
+            status_info["docs_folder"] = {
+                "path": docs_path,
+                "exists": True,
+                "pdf_count": pdf_count,
+                "status": "✅ trouvé"
+            }
+        else:
+            status_info["docs_folder"] = {
+                "path": docs_path,
+                "exists": False,
+                "status": "❌ dossier non trouvé"
+            }
+    except Exception as e:
+        status_info["docs_folder"] = {
+            "path": docs_path,
+            "status": f"❌ erreur: {str(e)}"
+        }
+    
+    # Déterminer l'état global
+    if not status_info["rag_initialized"]:
+        status_info["ok"] = False
+        status_info["message"] = "RAG non initialisé"
+    elif status_info["chromadb"].get("document_count", 0) == 0:
+        status_info["ok"] = False
+        status_info["message"] = "ChromaDB est vide - les réponses seront 'Empty Response'"
+    else:
+        status_info["message"] = f"RAG opérationnel avec {status_info['chromadb']['document_count']} documents"
+    
+    return status_info
+
+
+@app.post("/ingest")
+async def trigger_ingest(force: bool = False, max_docs: int = 50):
+    """
+    Déclenche manuellement l'ingestion des documents
+    
+    Args:
+        force: Si True, réindexe même si des documents existent
+        max_docs: Nombre maximum de documents à indexer
+    """
+    try:
+        # Importer et lancer l'ingestion
+        ingestion_path = os.path.join(os.path.dirname(__file__), "..", "ingestion")
+        sys.path.insert(0, ingestion_path)
+        
+        from ingest_api import ingest_documents
+        
+        # Exécuter dans un thread pour ne pas bloquer
+        import asyncio
+        from concurrent.futures import ThreadPoolExecutor
+        
+        loop = asyncio.get_event_loop()
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            success = await loop.run_in_executor(
+                executor, 
+                lambda: ingest_documents(force=force, max_docs=max_docs)
+            )
+        
+        if success:
+            return {"ok": True, "message": "Ingestion terminée avec succès"}
+        else:
+            return {"ok": False, "message": "Échec de l'ingestion"}
+            
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Erreur lors de l'ingestion: {str(e)}")
 
 @app.post("/query", response_model=RAGResponse)
 async def query_rag(request: RAGRequest):
