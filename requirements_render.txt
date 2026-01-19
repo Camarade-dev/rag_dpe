@@ -9,13 +9,15 @@
 llama-index-core>=0.10.0
 
 # Hugging Face LLM (API Inference - pas besoin de torch)
-# Note: peut installer torch comme dépendance optionnelle
+# PRIORITÉ: Utiliser la nouvelle API recommandée (corrige les warnings de dépréciation)
+llama-index-llms-huggingface-api>=0.1.0
+# Fallback vers l'ancienne API si nécessaire (dépréciée)
 llama-index-llms-huggingface>=0.1.0
 
 # Embeddings via API Hugging Face (pas besoin de sentence-transformers)
-# Essayer d'abord la nouvelle API recommandée
+# PRIORITÉ: Utiliser la nouvelle API recommandée (corrige l'erreur 410 Gone)
 llama-index-embeddings-huggingface-api>=0.1.0
-# Fallback vers l'ancienne API si nécessaire
+# Fallback vers l'ancienne API si nécessaire (dépréciée, peut causer 410 Gone)
 llama-index-embeddings-huggingface>=0.1.0
 
 # Vector store
@@ -48,4 +50,5 @@ huggingface-hub>=0.20.0
 # NOTE IMPORTANTE :
 # - sentence-transformers est EXCLU (économise torch, ~400 MB RAM)
 # - Les embeddings utilisent l'API Hugging Face (USE_API_EMBEDDINGS=true)
+# - Les nouvelles classes (huggingface-api) corrigent l'erreur 410 Gone et les warnings de dépréciation
 # - Si vous avez besoin de sentence-transformers localement, utilisez requirements.txt à la place

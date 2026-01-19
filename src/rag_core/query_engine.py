@@ -36,10 +36,18 @@ try:
 except ImportError:
     pass
 
+# Essayer d'abord la nouvelle API recommandée
 try:
-    from llama_index.llms.huggingface import HuggingFaceInferenceAPI
+    from llama_index.llms.huggingface_api import HuggingFaceInferenceAPI
+    _USE_NEW_HF_LLM_API = True
 except ImportError:
-    pass
+    # Fallback vers l'ancienne API (dépréciée mais fonctionnelle)
+    try:
+        from llama_index.llms.huggingface import HuggingFaceInferenceAPI
+        _USE_NEW_HF_LLM_API = False
+    except ImportError:
+        HuggingFaceInferenceAPI = None
+        _USE_NEW_HF_LLM_API = None
 
 try:
     from llama_index.llms.huggingface import HuggingFaceLLM
@@ -111,24 +119,40 @@ class RenovationRAG:
             
         elif provider == "huggingface":
             api_key = os.getenv("HUGGINGFACE_API_KEY")
-            model_name = os.getenv("HUGGINGFACE_MODEL", "mistralai/Mistral-7B-Instruct-v0.2")
+            model_name = os.getenv("HUGGINGFACE_MODEL", "mistralai/Mixtral-8x7B-Instruct-v0.1")
             
             if not api_key:
                 raise ValueError("❌ HUGGINGFACE_API_KEY non définie. Configurez-la dans les variables d'environnement pour utiliser l'API Inference (gratuit et sans RAM).")
             
             if HuggingFaceInferenceAPI is not None:
+                if _USE_NEW_HF_LLM_API:
+                    print("📦 Utilisation de llama-index-llms-huggingface-api (nouvelle API)")
+                else:
+                    print("⚠️  Utilisation de llama-index-llms-huggingface (ancienne API, dépréciée)")
                 print(f"🤖 Utilisation de Hugging Face Inference API : {model_name}")
                 print(f"🔑 API Key détectée : {api_key[:10]}...{api_key[-4:] if len(api_key) > 14 else '***'}")
                 try:
-                    self.llm = HuggingFaceInferenceAPI(
-                        model_name=model_name,
-                        token=api_key,
-                        temperature=0.1,
-                        max_new_tokens=256  # Réduit encore plus pour accélérer (était 512, initialement 1024)
-                    )
+                    # Les nouvelles classes utilisent 'model_name' et 'token' (ou 'api_key' selon la version)
+                    # Essayons d'abord avec 'model_name' et 'token' (nouvelle API)
+                    try:
+                        self.llm = HuggingFaceInferenceAPI(
+                            model_name=model_name,
+                            token=api_key,
+                            temperature=0.1,
+                            max_new_tokens=256  # Réduit pour accélérer et économiser les tokens API
+                        )
+                    except TypeError:
+                        # Si ça ne marche pas, essayons avec 'api_key' (ancienne API)
+                        self.llm = HuggingFaceInferenceAPI(
+                            model_name=model_name,
+                            api_key=api_key,
+                            temperature=0.1,
+                            max_new_tokens=256
+                        )
                 except Exception as e:
                     raise RuntimeError(f"❌ Erreur lors de l'initialisation de Hugging Face Inference API : {e}\n"
-                                     f"💡 Vérifiez que votre clé API est valide et que le modèle {model_name} est accessible.")
+                                     f"💡 Vérifiez que votre clé API est valide et que le modèle {model_name} est accessible.\n"
+                                     f"💡 Assurez-vous que llama-index-llms-huggingface-api est installé.")
             elif HuggingFaceLLM is not None:
                 # Fallback vers modèle local Hugging Face (nécessite plus de RAM)
                 print(f"⚠️  HuggingFaceInferenceAPI non disponible, utilisation du modèle local : {model_name}")
@@ -140,8 +164,8 @@ class RenovationRAG:
                     context_window=4096
                 )
             else:
-                raise ImportError("❌ Package llama-index-llms-huggingface non installé.\n"
-                                "💡 Installez-le avec: pip install llama-index-llms-huggingface huggingface-hub")
+                raise ImportError("❌ Package llama-index-llms-huggingface-api non installé.\n"
+                                "💡 Installez-le avec: pip install llama-index-llms-huggingface-api huggingface-hub")
                 
         elif provider == "anthropic":
             if Anthropic is None:
@@ -209,13 +233,26 @@ class RenovationRAG:
             try:
                 # Essayer d'importer HuggingFaceInferenceAPIEmbedding (nouvelle API)
                 # D'abord essayer la nouvelle API recommandée
+                HuggingFaceInferenceAPIEmbedding = None
+                use_new_embedding_api = False
                 try:
                     from llama_index.embeddings.huggingface_api import HuggingFaceInferenceAPIEmbedding
-                    print("📦 Utilisation de llama-index-embeddings-huggingface-api (nouvelle API)")
+                    use_new_embedding_api = True
                 except ImportError:
                     # Fallback vers l'ancienne API (dépréciée mais fonctionnelle)
-                    from llama_index.embeddings.huggingface import HuggingFaceInferenceAPIEmbedding
-                    print("📦 Utilisation de llama-index-embeddings-huggingface (ancienne API, dépréciée)")
+                    try:
+                        from llama_index.embeddings.huggingface import HuggingFaceInferenceAPIEmbedding
+                        use_new_embedding_api = False
+                    except ImportError:
+                        HuggingFaceInferenceAPIEmbedding = None
+                
+                if HuggingFaceInferenceAPIEmbedding is None:
+                    raise ImportError("❌ HuggingFaceInferenceAPIEmbedding non disponible. Installez llama-index-embeddings-huggingface-api")
+                
+                if use_new_embedding_api:
+                    print("📦 Utilisation de llama-index-embeddings-huggingface-api (nouvelle API)")
+                else:
+                    print("⚠️  Utilisation de llama-index-embeddings-huggingface (ancienne API, dépréciée)")
                 
                 api_key = os.getenv("HUGGINGFACE_API_KEY")
                 if not api_key:
@@ -223,27 +260,41 @@ class RenovationRAG:
                 
                 # Utiliser un modèle compatible avec l'API Hugging Face Inference
                 # Les modèles sentence-transformers retournent 410 Gone via feature-extraction
-                # Essayons d'utiliser l'API text-embeddings avec un modèle compatible
-                # Ou utilisons intfloat/multilingual-e5-base qui fonctionne avec l'API
+                # Utilisons intfloat/multilingual-e5-base qui fonctionne avec l'API text-embeddings
                 embedding_model_name = os.getenv(
                     "HUGGINGFACE_EMBEDDING_MODEL", 
                     "intfloat/multilingual-e5-base"  # Modèle qui fonctionne avec l'API text-embeddings
                 )
                 print(f"📦 Modèle d'embedding: {embedding_model_name}")
                 try:
-                    self.embed_model = HuggingFaceInferenceAPIEmbedding(
-                        api_key=api_key,
-                        model_name=embedding_model_name
-                    )
+                    # Les nouvelles classes peuvent utiliser 'api_key' ou 'token'
+                    # Essayons d'abord avec 'api_key' (plus courant)
+                    try:
+                        self.embed_model = HuggingFaceInferenceAPIEmbedding(
+                            api_key=api_key,
+                            model_name=embedding_model_name
+                        )
+                    except TypeError:
+                        # Si ça ne marche pas, essayons avec 'token'
+                        self.embed_model = HuggingFaceInferenceAPIEmbedding(
+                            token=api_key,
+                            model_name=embedding_model_name
+                        )
                 except Exception as e:
                     # Si le modèle ne fonctionne pas, essayons un autre
                     print(f"⚠️  Modèle {embedding_model_name} ne fonctionne pas: {e}")
                     print("🔄 Tentative avec BAAI/bge-small-en-v1.5...")
                     try:
-                        self.embed_model = HuggingFaceInferenceAPIEmbedding(
-                            api_key=api_key,
-                            model_name="BAAI/bge-small-en-v1.5"
-                        )
+                        try:
+                            self.embed_model = HuggingFaceInferenceAPIEmbedding(
+                                api_key=api_key,
+                                model_name="BAAI/bge-small-en-v1.5"
+                            )
+                        except TypeError:
+                            self.embed_model = HuggingFaceInferenceAPIEmbedding(
+                                token=api_key,
+                                model_name="BAAI/bge-small-en-v1.5"
+                            )
                         print("✅ Modèle BAAI/bge-small-en-v1.5 sélectionné")
                     except Exception as e2:
                         print(f"❌ BAAI/bge-small-en-v1.5 ne fonctionne pas non plus: {e2}")
@@ -252,9 +303,9 @@ class RenovationRAG:
             except ImportError as e:
                 error_msg = f"❌ HuggingFaceInferenceAPIEmbedding non disponible : {e}"
                 print(error_msg)
-                print("💡 Vérifiez que llama-index-embeddings-huggingface est installé")
-                print("💡 Si sentence-transformers n'est pas installé, c'est normal avec requirements_render.txt")
-                raise ImportError(f"{error_msg}\n💡 Sur Render, utilisez requirements_render.txt et vérifiez que USE_API_EMBEDDINGS=true")
+                print("💡 Vérifiez que llama-index-embeddings-huggingface-api est installé")
+                print("💡 Sur Render, utilisez requirements_render.txt et vérifiez que USE_API_EMBEDDINGS=true")
+                raise ImportError(f"{error_msg}\n💡 Installez avec: pip install llama-index-embeddings-huggingface-api")
             except Exception as e:
                 raise RuntimeError(f"❌ Erreur lors de l'initialisation des embeddings API : {e}")
         else:
