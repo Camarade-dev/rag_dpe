@@ -154,12 +154,18 @@ async def query_rag(request: RAGRequest):
     """
     Pose une question au système RAG et retourne une réponse avec sources
     """
+    import time
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+    
     global rag_engine
     
     if not rag_engine:
         raise HTTPException(status_code=503, detail="Moteur RAG non initialisé")
     
     try:
+        print(f"📝 Requête RAG reçue : {request.question[:100]}...")
+        
         # Construire la question personnalisée si des résultats DPE sont fournis
         question = request.question
         if request.dpe_results:
@@ -172,8 +178,17 @@ async def query_rag(request: RAGRequest):
 
 Peux-tu me donner des conseils personnalisés de rénovation énergétique adaptés à mon DPE ?"""
         
-        # Interroger le RAG
-        response = rag_engine.query(question)
+        print("🔍 Interrogation du RAG...")
+        start_time = time.time()
+        
+        # Exécuter la requête RAG dans un thread séparé pour éviter le conflit avec l'event loop
+        # HuggingFaceInferenceAPIEmbedding utilise asyncio.run() qui ne peut pas être appelé depuis un event loop
+        loop = asyncio.get_event_loop()
+        with ThreadPoolExecutor() as executor:
+            response = await loop.run_in_executor(executor, rag_engine.query, question)
+        
+        elapsed_time = time.time() - start_time
+        print(f"✅ Réponse RAG obtenue en {elapsed_time:.2f} secondes")
         
         # Extraire le texte de la réponse (streaming)
         texte_complet = ""
@@ -212,12 +227,18 @@ async def query_rag_and_generate_pdf(request: RAGRequest):
     """
     Pose une question au système RAG, génère une réponse et crée un PDF du rapport
     """
+    import time
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+    
     global rag_engine
     
     if not rag_engine:
         raise HTTPException(status_code=503, detail="Moteur RAG non initialisé")
     
     try:
+        print(f"📝 Requête RAG (PDF) reçue : {request.question[:100]}...")
+        
         # Construire la question personnalisée si des résultats DPE sont fournis
         question = request.question
         if request.dpe_results:
@@ -230,8 +251,16 @@ async def query_rag_and_generate_pdf(request: RAGRequest):
 
 Peux-tu me donner des conseils personnalisés de rénovation énergétique adaptés à mon DPE ?"""
         
-        # Interroger le RAG
-        response = rag_engine.query(question)
+        print("🔍 Interrogation du RAG...")
+        start_time = time.time()
+        
+        # Exécuter la requête RAG dans un thread séparé pour éviter le conflit avec l'event loop
+        loop = asyncio.get_event_loop()
+        with ThreadPoolExecutor() as executor:
+            response = await loop.run_in_executor(executor, rag_engine.query, question)
+        
+        elapsed_time = time.time() - start_time
+        print(f"✅ Réponse RAG obtenue en {elapsed_time:.2f} secondes")
         
         # Extraire le texte de la réponse (streaming)
         texte_complet = ""
