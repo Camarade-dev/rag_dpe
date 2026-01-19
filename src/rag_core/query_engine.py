@@ -124,7 +124,7 @@ class RenovationRAG:
                         model_name=model_name,
                         token=api_key,
                         temperature=0.1,
-                        max_new_tokens=512  # Réduit pour accélérer (était 1024)
+                        max_new_tokens=256  # Réduit encore plus pour accélérer (était 512, initialement 1024)
                     )
                 except Exception as e:
                     raise RuntimeError(f"❌ Erreur lors de l'initialisation de Hugging Face Inference API : {e}\n"
@@ -303,7 +303,7 @@ class RenovationRAG:
             self.query_engine = index.as_query_engine(
                 text_qa_template=qa_template,
                 streaming=True,
-                similarity_top_k=3 # Limite de 3 documents pour plus de contexte
+                similarity_top_k=2  # Réduit à 2 pour accélérer (était 3)
             )
             print("✅ Query engine configuré")
         except Exception as e:

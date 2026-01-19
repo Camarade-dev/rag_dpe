@@ -179,13 +179,25 @@ async def query_rag(request: RAGRequest):
 Peux-tu me donner des conseils personnalisés de rénovation énergétique adaptés à mon DPE ?"""
         
         print("🔍 Interrogation du RAG...")
+        print(f"⏱️  Timeout maximal: 10 minutes (600 secondes)")
         start_time = time.time()
         
         # Exécuter la requête RAG dans un thread séparé pour éviter le conflit avec l'event loop
         # HuggingFaceInferenceAPIEmbedding utilise asyncio.run() qui ne peut pas être appelé depuis un event loop
         loop = asyncio.get_event_loop()
-        with ThreadPoolExecutor() as executor:
-            response = await loop.run_in_executor(executor, rag_engine.query, question)
+        
+        # Utiliser un timeout asyncio pour éviter que ça bloque indéfiniment
+        try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                # Exécuter avec un timeout asyncio de 10 minutes
+                response = await asyncio.wait_for(
+                    loop.run_in_executor(executor, rag_engine.query, question),
+                    timeout=600.0  # 10 minutes
+                )
+        except asyncio.TimeoutError:
+            elapsed_time = time.time() - start_time
+            print(f"❌ Timeout après {elapsed_time:.2f} secondes")
+            raise HTTPException(status_code=504, detail=f"La requête RAG a pris plus de 10 minutes ({elapsed_time:.2f}s)")
         
         elapsed_time = time.time() - start_time
         print(f"✅ Réponse RAG obtenue en {elapsed_time:.2f} secondes")
@@ -252,12 +264,24 @@ async def query_rag_and_generate_pdf(request: RAGRequest):
 Peux-tu me donner des conseils personnalisés de rénovation énergétique adaptés à mon DPE ?"""
         
         print("🔍 Interrogation du RAG...")
+        print(f"⏱️  Timeout maximal: 10 minutes (600 secondes)")
         start_time = time.time()
         
         # Exécuter la requête RAG dans un thread séparé pour éviter le conflit avec l'event loop
         loop = asyncio.get_event_loop()
-        with ThreadPoolExecutor() as executor:
-            response = await loop.run_in_executor(executor, rag_engine.query, question)
+        
+        # Utiliser un timeout asyncio pour éviter que ça bloque indéfiniment
+        try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                # Exécuter avec un timeout asyncio de 10 minutes
+                response = await asyncio.wait_for(
+                    loop.run_in_executor(executor, rag_engine.query, question),
+                    timeout=600.0  # 10 minutes
+                )
+        except asyncio.TimeoutError:
+            elapsed_time = time.time() - start_time
+            print(f"❌ Timeout après {elapsed_time:.2f} secondes")
+            raise HTTPException(status_code=504, detail=f"La requête RAG a pris plus de 10 minutes ({elapsed_time:.2f}s)")
         
         elapsed_time = time.time() - start_time
         print(f"✅ Réponse RAG obtenue en {elapsed_time:.2f} secondes")
