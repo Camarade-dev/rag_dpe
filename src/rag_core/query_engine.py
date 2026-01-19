@@ -221,9 +221,18 @@ class RenovationRAG:
                 if not api_key:
                     raise ValueError("❌ HUGGINGFACE_API_KEY requise pour les embeddings API")
                 
+                # Utiliser un modèle compatible avec l'API Hugging Face Inference
+                # sentence-transformers/all-MiniLM-L6-v2 retourne 410 Gone (obsolète)
+                # Utilisons un modèle plus récent et compatible avec l'API
+                # Le modèle peut être configuré via HUGGINGFACE_EMBEDDING_MODEL (optionnel)
+                embedding_model_name = os.getenv(
+                    "HUGGINGFACE_EMBEDDING_MODEL", 
+                    "sentence-transformers/all-mpnet-base-v2"  # Modèle par défaut (plus récent et compatible)
+                )
+                print(f"📦 Modèle d'embedding: {embedding_model_name}")
                 self.embed_model = HuggingFaceInferenceAPIEmbedding(
                     api_key=api_key,
-                    model_name="sentence-transformers/all-MiniLM-L6-v2"
+                    model_name=embedding_model_name
                 )
                 print("✅ Embeddings via API Hugging Face (pas de modèle en mémoire, économise ~400 MB RAM)")
             except ImportError as e:
@@ -239,7 +248,8 @@ class RenovationRAG:
             # Import conditionnel pour éviter de charger torch si on ne l'utilise pas
             try:
                 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
-                self.embed_model = HuggingFaceEmbedding(model_name="sentence-transformers/all-MiniLM-L6-v2")
+                # Utiliser le même modèle pour la cohérence si on utilise les embeddings locaux
+                self.embed_model = HuggingFaceEmbedding(model_name="BAAI/bge-small-en-v1.5")
                 print("📦 Embeddings locaux (modèle chargé en mémoire)")
             except ImportError as e:
                 raise ImportError(f"❌ HuggingFaceEmbedding non disponible : {e}\n💡 Installez sentence-transformers avec: pip install sentence-transformers")
