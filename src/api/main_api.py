@@ -183,10 +183,8 @@ Peux-tu me donner des conseils personnalisés de rénovation énergétique adapt
         start_time = time.time()
         
         # Exécuter la requête RAG dans un thread séparé pour éviter le conflit avec l'event loop
-        # HuggingFaceInferenceAPIEmbedding utilise asyncio.run() qui ne peut pas être appelé depuis un event loop
+        # La méthode query() de RenovationRAG gère maintenant elle-même l'isolation de l'event loop
         loop = asyncio.get_event_loop()
-        
-        # Utiliser un timeout asyncio pour éviter que ça bloque indéfiniment
         try:
             with ThreadPoolExecutor(max_workers=1) as executor:
                 # Exécuter avec un timeout asyncio de 10 minutes
@@ -197,6 +195,10 @@ Peux-tu me donner des conseils personnalisés de rénovation énergétique adapt
         except asyncio.TimeoutError:
             elapsed_time = time.time() - start_time
             print(f"❌ Timeout après {elapsed_time:.2f} secondes")
+            raise HTTPException(status_code=504, detail=f"La requête RAG a pris plus de 10 minutes ({elapsed_time:.2f}s)")
+        except TimeoutError as e:
+            elapsed_time = time.time() - start_time
+            print(f"❌ Timeout dans le thread RAG après {elapsed_time:.2f} secondes")
             raise HTTPException(status_code=504, detail=f"La requête RAG a pris plus de 10 minutes ({elapsed_time:.2f}s)")
         
         elapsed_time = time.time() - start_time
@@ -268,6 +270,7 @@ Peux-tu me donner des conseils personnalisés de rénovation énergétique adapt
         start_time = time.time()
         
         # Exécuter la requête RAG dans un thread séparé pour éviter le conflit avec l'event loop
+        # La méthode query() de RenovationRAG gère maintenant elle-même l'isolation de l'event loop
         loop = asyncio.get_event_loop()
         
         # Utiliser un timeout asyncio pour éviter que ça bloque indéfiniment
@@ -281,6 +284,10 @@ Peux-tu me donner des conseils personnalisés de rénovation énergétique adapt
         except asyncio.TimeoutError:
             elapsed_time = time.time() - start_time
             print(f"❌ Timeout après {elapsed_time:.2f} secondes")
+            raise HTTPException(status_code=504, detail=f"La requête RAG a pris plus de 10 minutes ({elapsed_time:.2f}s)")
+        except TimeoutError as e:
+            elapsed_time = time.time() - start_time
+            print(f"❌ Timeout dans le thread RAG après {elapsed_time:.2f} secondes")
             raise HTTPException(status_code=504, detail=f"La requête RAG a pris plus de 10 minutes ({elapsed_time:.2f}s)")
         
         elapsed_time = time.time() - start_time

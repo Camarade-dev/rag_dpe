@@ -314,4 +314,41 @@ class RenovationRAG:
 
     def query(self, user_question):
         """Méthode publique pour poser une question"""
-        return self.query_engine.query(user_question)
+        import threading
+        import asyncio
+        
+        # Créer un nouvel event loop dans un thread séparé pour éviter le conflit
+        # avec l'event loop de FastAPI/uvicorn
+        result_container = {}
+        exception_container = {}
+        
+        def run_in_new_loop():
+            """Exécute la requête dans un nouvel event loop isolé"""
+            try:
+                # Créer un nouvel event loop pour ce thread
+                new_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(new_loop)
+                try:
+                    # Exécuter la requête (qui peut utiliser asyncio.run() en interne)
+                    result = self.query_engine.query(user_question)
+                    result_container['result'] = result
+                finally:
+                    new_loop.close()
+            except Exception as e:
+                exception_container['exception'] = e
+        
+        # Exécuter dans un thread séparé avec un nouvel event loop
+        thread = threading.Thread(target=run_in_new_loop, daemon=True)
+        thread.start()
+        thread.join(timeout=600)  # Timeout de 10 minutes
+        
+        if thread.is_alive():
+            raise TimeoutError("La requête RAG a pris plus de 10 minutes")
+        
+        if 'exception' in exception_container:
+            raise exception_container['exception']
+        
+        if 'result' in result_container:
+            return result_container['result']
+        
+        raise RuntimeError("La requête RAG n'a retourné aucun résultat")
