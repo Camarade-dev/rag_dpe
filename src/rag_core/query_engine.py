@@ -88,21 +88,20 @@ PROMPT_PATH = os.path.join(BASE_DIR, "prompts", "renovation_expert.txt")
 
 class HuggingFaceRouterLLM(CustomLLM):
     """
-    Wrapper LLM personnalisé pour Hugging Face utilisant le nouveau router.huggingface.co
-    L'ancienne API api-inference.huggingface.co est dépréciée (erreur 410 Gone)
+    Wrapper LLM personnalisé pour Hugging Face utilisant le SDK officiel huggingface_hub
+    Utilise chat_completion qui fonctionne avec le nouveau router
     """
     
     api_key: str = ""
-    model_name: str = "mistralai/Mistral-7B-Instruct-v0.3"
+    model_name: str = "Qwen/Qwen2.5-72B-Instruct"  # Modèle gratuit qui fonctionne
     temperature: float = 0.1
     max_new_tokens: int = 512
-    _url: str = ""
-    _headers: dict = {}
+    _client: Any = None
     
     def __init__(
         self,
         api_key: str,
-        model_name: str = "mistralai/Mistral-7B-Instruct-v0.3",
+        model_name: str = "Qwen/Qwen2.5-72B-Instruct",
         temperature: float = 0.1,
         max_new_tokens: int = 512,
         **kwargs
@@ -112,171 +111,98 @@ class HuggingFaceRouterLLM(CustomLLM):
         self.model_name = model_name
         self.temperature = temperature
         self.max_new_tokens = max_new_tokens
-        # Utiliser le nouveau router.huggingface.co
-        self._url = f"https://router.huggingface.co/hf-inference/models/{model_name}"
-        self._headers = {"Authorization": f"Bearer {api_key}"}
+        
+        # Initialiser le client HuggingFace
+        try:
+            from huggingface_hub import InferenceClient
+            self._client = InferenceClient(token=api_key)
+            print(f"   Client HuggingFace initialisé pour {model_name}")
+        except ImportError:
+            raise ImportError("huggingface_hub non installé. pip install huggingface_hub>=1.0.0")
     
     @property
     def metadata(self) -> LLMMetadata:
         return LLMMetadata(
-            context_window=4096,
+            context_window=8192,
             num_output=self.max_new_tokens,
             model_name=self.model_name,
-            is_chat_model=False  # Changé à False pour éviter les problèmes de chat
+            is_chat_model=True  # Utilise chat_completion
         )
     
     def _call_api(self, prompt: str, max_retries: int = 5) -> str:
-        """Appelle l'API Hugging Face avec retries robustes"""
+        """Appelle l'API Hugging Face via chat_completion avec retries robustes"""
         # Limiter la taille du prompt pour éviter les erreurs
-        max_prompt_chars = 8000  # ~2000 tokens environ
+        max_prompt_chars = 12000  # ~3000 tokens environ
         if len(prompt) > max_prompt_chars:
-            print(f"   ⚠️ Prompt trop long ({len(prompt)} chars), truncation à {max_prompt_chars}")
+            print(f"   Prompt trop long ({len(prompt)} chars), truncation...")
             prompt = prompt[:max_prompt_chars] + "..."
         
-        payload = {
-            "inputs": prompt,
-            "parameters": {
-                "max_new_tokens": self.max_new_tokens,
-                "temperature": max(0.01, self.temperature),  # Éviter temperature=0
-                "return_full_text": False,
-                "do_sample": True
-            }
-        }
-        
         last_error = None
-        last_status = None
         
         for attempt in range(max_retries):
             try:
-                print(f"   🔄 Appel LLM (tentative {attempt + 1}/{max_retries})...")
-                response = requests.post(
-                    self._url,
-                    headers=self._headers,
-                    json=payload,
-                    timeout=180  # 3 minutes timeout
+                print(f"   Appel LLM via chat_completion (tentative {attempt + 1}/{max_retries})...")
+                
+                # Utiliser chat_completion qui fonctionne avec le nouveau router
+                messages = [{"role": "user", "content": prompt}]
+                
+                result = self._client.chat_completion(
+                    messages=messages,
+                    model=self.model_name,
+                    max_tokens=self.max_new_tokens,
+                    temperature=max(0.01, self.temperature)
                 )
                 
-                last_status = response.status_code
+                # Extraire le texte de la réponse
+                if hasattr(result, 'choices') and len(result.choices) > 0:
+                    text = result.choices[0].message.content
+                    if text:
+                        print(f"   Reponse LLM recue ({len(text)} caracteres)")
+                        return text
                 
-                if response.status_code == 200:
-                    data = response.json()
-                    # Format de réponse: [{"generated_text": "..."}]
-                    if isinstance(data, list) and len(data) > 0:
-                        text = data[0].get("generated_text", "")
+                # Format alternatif
+                if isinstance(result, dict):
+                    choices = result.get('choices', [])
+                    if choices:
+                        text = choices[0].get('message', {}).get('content', '')
                         if text:
-                            print(f"   ✅ Réponse LLM reçue ({len(text)} caractères)")
                             return text
-                    elif isinstance(data, dict):
-                        text = data.get("generated_text", "")
-                        if text:
-                            return text
-                        # Peut être une erreur dans le format dict
-                        if "error" in data:
-                            raise RuntimeError(f"API error: {data['error']}")
-                    # Réponse vide ou format inattendu
-                    print(f"   ⚠️ Réponse vide ou format inattendu: {str(data)[:200]}")
-                    last_error = "Réponse vide"
-                    continue
                 
-                elif response.status_code == 503:
-                    # Modèle en chargement
-                    try:
-                        error_data = response.json()
-                        estimated_time = error_data.get("estimated_time", 30)
-                    except:
-                        estimated_time = 30
-                    wait_time = min(estimated_time + 5, 60)
-                    print(f"   ⏳ Modèle en chargement (503), attente {wait_time}s...")
-                    time.sleep(wait_time)
-                    last_error = "503 - Modèle en chargement"
-                    continue
-                
-                elif response.status_code == 500:
-                    # Erreur serveur interne
-                    wait_time = min(10 * (attempt + 1), 60)
-                    try:
-                        error_text = response.text[:200]
-                    except:
-                        error_text = "Unknown"
-                    print(f"   ⚠️ Erreur serveur 500: {error_text}, retry dans {wait_time}s...")
-                    time.sleep(wait_time)
-                    last_error = f"500 - {error_text}"
-                    continue
-                
-                elif response.status_code == 422:
-                    # Erreur de validation - prompt trop long ou mal formé
-                    try:
-                        error_data = response.json()
-                        error_msg = str(error_data)[:300]
-                    except:
-                        error_msg = response.text[:300]
-                    print(f"   ❌ Erreur de validation (422): {error_msg}")
-                    # Réduire le prompt et réessayer
-                    if len(prompt) > 2000:
-                        prompt = prompt[:2000] + "..."
-                        payload["inputs"] = prompt
-                        last_error = f"422 - Validation error, retrying with shorter prompt"
-                        continue
-                    raise RuntimeError(f"Erreur de validation API: {error_msg}")
-                
-                elif response.status_code == 429:
-                    # Rate limiting
-                    wait_time = min(30 * (attempt + 1), 120)
-                    print(f"   🚫 Rate limit (429), attente {wait_time}s...")
-                    time.sleep(wait_time)
-                    last_error = "429 - Rate limited"
-                    continue
-                
-                elif response.status_code == 404:
-                    # Modèle non trouvé
-                    raise RuntimeError(
-                        f"❌ Modèle '{self.model_name}' non trouvé (404). "
-                        f"Vérifiez que le modèle existe sur Hugging Face et est accessible via l'API Inference."
-                    )
-                
-                else:
-                    try:
-                        error_text = response.text[:300]
-                    except:
-                        error_text = f"Status {response.status_code}"
-                    print(f"   ❌ Erreur HTTP {response.status_code}: {error_text}")
-                    last_error = f"{response.status_code} - {error_text}"
-                    if attempt < max_retries - 1:
-                        time.sleep(5)
-                        continue
-                    response.raise_for_status()
-                    
-            except requests.exceptions.Timeout:
-                wait_time = min(15 * (attempt + 1), 60)
-                print(f"   ⏱️ Timeout (180s), retry dans {wait_time}s...")
-                time.sleep(wait_time)
-                last_error = "Timeout"
+                print(f"   Reponse vide ou format inattendu")
+                last_error = "Réponse vide"
                 continue
-                
-            except requests.exceptions.ConnectionError as e:
-                wait_time = min(10 * (attempt + 1), 30)
-                print(f"   🔌 Erreur connexion: {e}, retry dans {wait_time}s...")
-                time.sleep(wait_time)
-                last_error = f"Connection error: {e}"
-                continue
-                
-            except RuntimeError:
-                raise  # Re-raise RuntimeError directement
                 
             except Exception as e:
-                last_error = str(e)
-                print(f"   ❌ Exception inattendue: {e}")
-                if attempt < max_retries - 1:
+                error_str = str(e)
+                last_error = error_str
+                print(f"   Erreur: {error_str[:150]}")
+                
+                # Gestion des erreurs spécifiques
+                if "503" in error_str or "loading" in error_str.lower():
+                    wait_time = min(20 * (attempt + 1), 60)
+                    print(f"   Modele en chargement, attente {wait_time}s...")
+                    time.sleep(wait_time)
+                    continue
+                
+                elif "429" in error_str or "rate" in error_str.lower():
+                    wait_time = min(30 * (attempt + 1), 120)
+                    print(f"   Rate limit, attente {wait_time}s...")
+                    time.sleep(wait_time)
+                    continue
+                
+                elif "500" in error_str:
+                    wait_time = min(10 * (attempt + 1), 30)
+                    print(f"   Erreur serveur, retry dans {wait_time}s...")
+                    time.sleep(wait_time)
+                    continue
+                
+                elif attempt < max_retries - 1:
                     time.sleep(5)
                     continue
+                
                 raise RuntimeError(f"Erreur LLM: {e}")
         
-        raise RuntimeError(
-            f"❌ Échec après {max_retries} tentatives. "
-            f"Dernier status: {last_status}. "
-            f"Dernière erreur: {last_error}. "
-            f"Modèle: {self.model_name}"
-        )
+        raise RuntimeError(f"Echec apres {max_retries} tentatives. Derniere erreur: {last_error}")
     
     @llm_completion_callback()
     def complete(self, prompt: str, **kwargs) -> CompletionResponse:
@@ -473,19 +399,16 @@ class RenovationRAG:
             
         elif provider == "huggingface":
             api_key = os.getenv("HUGGINGFACE_API_KEY")
-            # Utiliser Mistral-7B-Instruct-v0.3 par défaut (plus léger et disponible sur l'API)
-            # Mixtral-8x7B peut ne plus être disponible sur l'API gratuite
-            model_name = os.getenv("HUGGINGFACE_MODEL", "mistralai/Mistral-7B-Instruct-v0.3")
+            # Utiliser Qwen/Qwen2.5-72B-Instruct par défaut (gratuit et fonctionne avec chat_completion)
+            model_name = os.getenv("HUGGINGFACE_MODEL", "Qwen/Qwen2.5-72B-Instruct")
             
             if not api_key:
-                raise ValueError("❌ HUGGINGFACE_API_KEY non définie. Configurez-la dans les variables d'environnement.")
+                raise ValueError("HUGGINGFACE_API_KEY non definie. Configurez-la dans les variables d'environnement.")
             
-            # IMPORTANT: Utiliser notre wrapper personnalisé qui utilise router.huggingface.co
-            # L'ancienne API api-inference.huggingface.co est dépréciée (erreur 410 Gone)
-            print("📦 Utilisation du wrapper personnalisé HuggingFaceRouterLLM")
-            print(f"🤖 Modèle LLM : {model_name}")
-            print(f"🌐 URL : router.huggingface.co (nouvelle API)")
-            print(f"🔑 API Key : {api_key[:10]}...{api_key[-4:] if len(api_key) > 14 else '***'}")
+            # Utiliser notre wrapper qui utilise le SDK huggingface_hub avec chat_completion
+            print("Utilisation du wrapper HuggingFaceRouterLLM (SDK huggingface_hub)")
+            print(f"Modele LLM : {model_name}")
+            print(f"API Key : {api_key[:10]}...{api_key[-4:] if len(api_key) > 14 else '***'}")
             
             try:
                 self.llm = HuggingFaceRouterLLM(
@@ -495,8 +418,8 @@ class RenovationRAG:
                     max_new_tokens=512
                 )
             except Exception as e:
-                raise RuntimeError(f"❌ Erreur lors de l'initialisation du LLM Hugging Face : {e}\n"
-                                 f"💡 Vérifiez que votre clé API est valide et que le modèle {model_name} est accessible.")
+                raise RuntimeError(f"Erreur lors de l'initialisation du LLM Hugging Face : {e}\n"
+                                 f"Verifiez que votre cle API est valide et que le modele {model_name} est accessible.")
                 
         elif provider == "anthropic":
             if Anthropic is None:

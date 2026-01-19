@@ -56,7 +56,7 @@ services:
       - key: HUGGINGFACE_API_KEY
         sync: false  # À configurer manuellement dans Render
       - key: HUGGINGFACE_MODEL
-        value: mistralai/Mistral-7B-Instruct-v0.3  # Modèle plus léger et disponible sur l'API
+        value: Qwen/Qwen2.5-72B-Instruct  # Modele gratuit qui fonctionne avec chat_completion
       # NOUVELLES VARIABLES POUR L'INGESTION AUTOMATIQUE
       - key: USE_API_EMBEDDINGS
         value: "true"  # Utiliser l'API Hugging Face pour les embeddings (économise ~400 MB RAM)
