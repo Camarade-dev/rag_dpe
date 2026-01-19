@@ -124,7 +124,7 @@ class RenovationRAG:
                         model_name=model_name,
                         token=api_key,
                         temperature=0.1,
-                        max_new_tokens=1024
+                        max_new_tokens=512  # Réduit pour accélérer (était 1024)
                     )
                 except Exception as e:
                     raise RuntimeError(f"❌ Erreur lors de l'initialisation de Hugging Face Inference API : {e}\n"
