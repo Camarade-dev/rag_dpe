@@ -204,13 +204,68 @@ Peux-tu me donner des conseils personnalisés de rénovation énergétique adapt
         elapsed_time = time.time() - start_time
         print(f"✅ Réponse RAG obtenue en {elapsed_time:.2f} secondes")
         
+        # Debug: afficher la structure de la réponse
+        print(f"🔍 Type de réponse: {type(response)}")
+        print(f"🔍 Attributs de la réponse: {[attr for attr in dir(response) if not attr.startswith('_')]}")
+        
         # Extraire le texte de la réponse (streaming)
+        # PRIORITÉ: Utiliser response.response directement (disponible même en mode streaming)
         texte_complet = ""
-        if hasattr(response, 'response_gen'):
-            for token in response.response_gen:
-                texte_complet += token
+        if hasattr(response, 'response'):
+            # L'attribut response contient le texte complet (même en mode streaming)
+            texte_complet = str(response.response)
+            print(f"✅ Texte extrait depuis response.response (longueur: {len(texte_complet)} caractères)")
+        elif hasattr(response, 'response_gen'):
+            # Mode streaming: collecter tous les tokens si response.response n'est pas disponible
+            print("📡 Mode streaming détecté, collecte des tokens depuis response_gen...")
+            token_count = 0
+            try:
+                for token in response.response_gen:
+                    texte_complet += token
+                    token_count += 1
+                    if token_count <= 5:  # Afficher les 5 premiers tokens pour debug
+                        print(f"   Token {token_count}: {repr(token[:50])}")
+                print(f"📊 Total de {token_count} tokens collectés")
+            except Exception as e:
+                print(f"⚠️  Erreur lors de la collecte des tokens: {e}")
+                import traceback
+                traceback.print_exc()
+        elif hasattr(response, 'response'):
+            # Mode non-streaming: utiliser l'attribut response
+            texte_complet = str(response.response)
+        elif hasattr(response, 'get_response'):
+            # Méthode alternative pour obtenir la réponse
+            texte_complet = str(response.get_response())
         else:
+            # Dernier recours: convertir en string
             texte_complet = str(response)
+        
+        # Vérifier que le texte n'est pas vide
+        if not texte_complet or texte_complet.strip() == "":
+            print("⚠️  La réponse RAG est vide, vérification de la structure de la réponse...")
+            print(f"   Type de réponse: {type(response)}")
+            print(f"   Attributs disponibles: {[attr for attr in dir(response) if not attr.startswith('_')]}")
+            if hasattr(response, '__dict__'):
+                print(f"   __dict__: {response.__dict__}")
+            # Essayer d'autres méthodes pour extraire le texte
+            if hasattr(response, 'response'):
+                print("🔄 Tentative avec response.response...")
+                texte_complet = str(response.response)
+            elif hasattr(response, 'text'):
+                print("🔄 Tentative avec response.text...")
+                texte_complet = str(response.text)
+            elif hasattr(response, 'answer'):
+                print("🔄 Tentative avec response.answer...")
+                texte_complet = str(response.answer)
+            else:
+                # Si toujours vide, utiliser une valeur par défaut
+                texte_complet = "Empty Response"
+                print("❌ Impossible d'extraire le texte de la réponse RAG")
+                print(f"   Représentation de la réponse: {repr(response)}")
+        
+        print(f"📝 Texte extrait (longueur: {len(texte_complet)} caractères)")
+        if len(texte_complet) < 100:
+            print(f"   Aperçu: {texte_complet[:200]}")
         
         # Extraire les sources
         sources = []
@@ -293,13 +348,68 @@ Peux-tu me donner des conseils personnalisés de rénovation énergétique adapt
         elapsed_time = time.time() - start_time
         print(f"✅ Réponse RAG obtenue en {elapsed_time:.2f} secondes")
         
+        # Debug: afficher la structure de la réponse
+        print(f"🔍 Type de réponse: {type(response)}")
+        print(f"🔍 Attributs de la réponse: {[attr for attr in dir(response) if not attr.startswith('_')]}")
+        
         # Extraire le texte de la réponse (streaming)
+        # PRIORITÉ: Utiliser response.response directement (disponible même en mode streaming)
         texte_complet = ""
-        if hasattr(response, 'response_gen'):
-            for token in response.response_gen:
-                texte_complet += token
+        if hasattr(response, 'response'):
+            # L'attribut response contient le texte complet (même en mode streaming)
+            texte_complet = str(response.response)
+            print(f"✅ Texte extrait depuis response.response (longueur: {len(texte_complet)} caractères)")
+        elif hasattr(response, 'response_gen'):
+            # Mode streaming: collecter tous les tokens si response.response n'est pas disponible
+            print("📡 Mode streaming détecté, collecte des tokens depuis response_gen...")
+            token_count = 0
+            try:
+                for token in response.response_gen:
+                    texte_complet += token
+                    token_count += 1
+                    if token_count <= 5:  # Afficher les 5 premiers tokens pour debug
+                        print(f"   Token {token_count}: {repr(token[:50])}")
+                print(f"📊 Total de {token_count} tokens collectés")
+            except Exception as e:
+                print(f"⚠️  Erreur lors de la collecte des tokens: {e}")
+                import traceback
+                traceback.print_exc()
+        elif hasattr(response, 'response'):
+            # Mode non-streaming: utiliser l'attribut response
+            texte_complet = str(response.response)
+        elif hasattr(response, 'get_response'):
+            # Méthode alternative pour obtenir la réponse
+            texte_complet = str(response.get_response())
         else:
+            # Dernier recours: convertir en string
             texte_complet = str(response)
+        
+        # Vérifier que le texte n'est pas vide
+        if not texte_complet or texte_complet.strip() == "":
+            print("⚠️  La réponse RAG est vide, vérification de la structure de la réponse...")
+            print(f"   Type de réponse: {type(response)}")
+            print(f"   Attributs disponibles: {[attr for attr in dir(response) if not attr.startswith('_')]}")
+            if hasattr(response, '__dict__'):
+                print(f"   __dict__: {response.__dict__}")
+            # Essayer d'autres méthodes pour extraire le texte
+            if hasattr(response, 'response'):
+                print("🔄 Tentative avec response.response...")
+                texte_complet = str(response.response)
+            elif hasattr(response, 'text'):
+                print("🔄 Tentative avec response.text...")
+                texte_complet = str(response.text)
+            elif hasattr(response, 'answer'):
+                print("🔄 Tentative avec response.answer...")
+                texte_complet = str(response.answer)
+            else:
+                # Si toujours vide, utiliser une valeur par défaut
+                texte_complet = "Empty Response"
+                print("❌ Impossible d'extraire le texte de la réponse RAG")
+                print(f"   Représentation de la réponse: {repr(response)}")
+        
+        print(f"📝 Texte extrait (longueur: {len(texte_complet)} caractères)")
+        if len(texte_complet) < 100:
+            print(f"   Aperçu: {texte_complet[:200]}")
         
         # Extraire les sources
         sources = []
