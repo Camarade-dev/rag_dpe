@@ -147,7 +147,8 @@ async def lifespan(app: FastAPI):
         print("=" * 60)
         print("✅ Moteur RAG prêt !")
         print("=" * 60)
-        print("🌐 L'API est prête à recevoir des requêtes sur le port $PORT")
+        port = os.getenv("PORT", "8002")
+        print(f"🌐 L'API est prête à recevoir des requêtes sur le port {port}")
         
     except Exception as e:
         print("=" * 60)
@@ -162,12 +163,23 @@ async def lifespan(app: FastAPI):
         # Les requêtes retourneront une erreur 503 mais l'API sera accessible
         print("⚠️  L'API démarre mais le RAG n'est pas initialisé - les requêtes échoueront")
         rag_engine = None
-        print("🌐 L'API est quand même accessible sur le port $PORT (mais le RAG ne fonctionnera pas)")
+        port = os.getenv("PORT", "8002")
+        print(f"🌐 L'API est quand même accessible sur le port {port} (mais le RAG ne fonctionnera pas)")
     yield
     # Shutdown (nettoyage si nécessaire)
     pass
 
 app = FastAPI(title="API RAG Rénovation", version="1.0.0", lifespan=lifespan)
+
+# Endpoint de health check pour Render (répond immédiatement même pendant l'initialisation)
+@app.get("/health")
+async def health_check():
+    """Endpoint de health check pour Render - répond immédiatement"""
+    return {
+        "status": "ok",
+        "rag_initialized": rag_engine is not None,
+        "port": os.getenv("PORT", "8002")
+    }
 
 # Servir les fichiers PDF statiques
 # Calculer le chemin absolu vers le dossier docs
@@ -843,5 +855,8 @@ Peux-tu me donner des conseils personnalisés de rénovation énergétique adapt
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8002)
+    # Utiliser la variable d'environnement PORT pour Render, sinon 8002 par défaut
+    port = int(os.getenv("PORT", "8002"))
+    print(f"🚀 Démarrage de l'API sur le port {port}")
+    uvicorn.run(app, host="0.0.0.0", port=port)
 
