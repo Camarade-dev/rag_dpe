@@ -26,7 +26,9 @@ from contextlib import asynccontextmanager
 import sys
 
 # Ajouter le chemin src pour importer le RAG
-sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
+# Le chemin parent de api/ est src/, donc on ajoute src/ au path
+src_path = os.path.join(os.path.dirname(__file__), "..")
+sys.path.insert(0, src_path)
 from rag_core.query_engine import RenovationRAG
 from pdf_generator import parse_building_info, parse_rag_response, generate_renovation_pdf
 
@@ -523,11 +525,56 @@ Peux-tu me donner des conseils personnalisés de rénovation énergétique adapt
                     "score": float(node.score) if node.score else 0.0
                 })
         
+        # Générer le PDF
+        pdf_filename = None
+        try:
+            outputs_dir = os.path.join(BASE_DIR, "outputs")
+            os.makedirs(outputs_dir, exist_ok=True)
+            pdf_filename = f"rapport_renovation_{os.urandom(8).hex()}.pdf"
+            pdf_path = os.path.join(outputs_dir, pdf_filename)
+            
+            # Construire le prompt complet pour parser les infos du bâtiment
+            prompt_complet = question
+            if request.dpe_results:
+                # Ajouter les infos DPE au prompt pour le parsing
+                dpe_info = f"""
+DPE ACTUEL: {request.dpe_results.get('classe_dpe_finale', 'N/A')}
+"""
+                if 'surface_habitable_logement' in request.dpe_results:
+                    dpe_info += f"Surface: {request.dpe_results.get('surface_habitable_logement')} m2\n"
+                prompt_complet = dpe_info + prompt_complet
+            
+            # Parser les informations du bâtiment depuis la question et les résultats DPE
+            building_info = parse_building_info(prompt_complet)
+            # Enrichir avec les données DPE si disponibles
+            if request.dpe_results:
+                if 'surface_habitable_logement' in request.dpe_results:
+                    building_info['surface'] = f"{request.dpe_results.get('surface_habitable_logement')} m2"
+                if 'ubat_w_par_m2_k' in request.dpe_results:
+                    building_info['ubat'] = f"{request.dpe_results.get('ubat_w_par_m2_k')} W/m2.K"
+                if 'conso_chauffage_ep_par_m2' in request.dpe_results:
+                    building_info['conso_chauffage'] = f"{request.dpe_results.get('conso_chauffage_ep_par_m2')} kWhEP/m2"
+                if 'emission_ges_chauffage_par_m2' in request.dpe_results:
+                    building_info['emissions_co2'] = f"{request.dpe_results.get('emission_ges_chauffage_par_m2')} kgCO2/m2"
+            
+            # Parser la réponse du RAG
+            parsed_response = parse_rag_response(texte_complet)
+            # Générer le PDF
+            generate_renovation_pdf(building_info, parsed_response, pdf_path)
+            print(f"✅ PDF généré avec succès: {pdf_filename}")
+        except Exception as pdf_error:
+            print(f"⚠️  Erreur lors de la génération du PDF: {pdf_error}")
+            import traceback
+            traceback.print_exc()
+            # Ne pas bloquer la réponse si le PDF échoue
+            pdf_filename = None
+        
         return RAGResponse(
             ok=True,
             data={
                 "response": texte_complet,
-                "sources": sources
+                "sources": sources,
+                "pdf_filename": pdf_filename  # Nom du fichier PDF généré
             }
         )
         
@@ -536,6 +583,28 @@ Peux-tu me donner des conseils personnalisés de rénovation énergétique adapt
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Erreur lors de la génération de la réponse: {str(e)}")
+
+@app.get("/pdf/{filename}")
+async def download_pdf(filename: str):
+    """
+    Télécharge un PDF généré précédemment
+    """
+    outputs_dir = os.path.join(BASE_DIR, "outputs")
+    pdf_path = os.path.join(outputs_dir, filename)
+    
+    # Sécurité: vérifier que le fichier est dans le dossier outputs
+    if not os.path.abspath(pdf_path).startswith(os.path.abspath(outputs_dir)):
+        raise HTTPException(status_code=403, detail="Accès non autorisé")
+    
+    if not os.path.exists(pdf_path):
+        raise HTTPException(status_code=404, detail=f"PDF non trouvé: {filename}")
+    
+    return FileResponse(
+        pdf_path,
+        media_type="application/pdf",
+        filename=filename,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
 
 @app.post("/query/pdf")
 async def query_rag_and_generate_pdf(request: RAGRequest):
