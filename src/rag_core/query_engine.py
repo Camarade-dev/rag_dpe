@@ -84,6 +84,7 @@ DB_PATH = os.getenv("CHROMA_DB_PATH", os.path.join(BASE_DIR, "data", "chroma_db"
 MODEL_PATH = os.getenv("LLM_MODEL_PATH", os.path.join(BASE_DIR, "data", "llm_models", "mistral-7b-instruct-v0.2.Q4_K_M.gguf"))
 COLLECTION_NAME = "renovation_knowledge"
 PROMPT_PATH = os.path.join(BASE_DIR, "prompts", "renovation_expert.txt")
+PROMPT_PDF_PATH = os.path.join(BASE_DIR, "prompts", "renovation_expert_pdf.txt")
 
 
 class HuggingFaceRouterLLM(CustomLLM):
@@ -770,16 +771,43 @@ class RenovationRAG:
                 similarity_top_k=2  # Réduit à 2 pour accélérer (était 3)
             )
             print("✅ Query engine configuré")
+            
+            # Créer aussi un query engine pour le PDF avec le prompt PDF
+            self.query_engine_pdf = None
+            if os.path.exists(PROMPT_PDF_PATH):
+                print(f"📄 Lecture du prompt PDF depuis : {PROMPT_PDF_PATH}")
+                with open(PROMPT_PDF_PATH, "r", encoding="utf-8") as f:
+                    pdf_template_content = f.read()
+                if "{context_str}" in pdf_template_content and "{query_str}" in pdf_template_content:
+                    pdf_qa_template = PromptTemplate(pdf_template_content)
+                    self.query_engine_pdf = index.as_query_engine(
+                        text_qa_template=pdf_qa_template,
+                        streaming=use_streaming,
+                        similarity_top_k=2
+                    )
+                    print("✅ Query engine PDF configuré")
+                else:
+                    print("⚠️  Le prompt PDF ne contient pas {context_str} et {query_str}, utilisation du prompt normal")
+            else:
+                print(f"⚠️  Prompt PDF non trouvé ({PROMPT_PDF_PATH}), utilisation du prompt normal pour le PDF")
         except Exception as e:
             print(f"❌ Erreur lors de l'initialisation du query engine : {e}")
             import traceback
             traceback.print_exc()
             raise
 
-    def query(self, user_question):
-        """Méthode publique pour poser une question"""
+    def query(self, user_question, for_pdf=False):
+        """Méthode publique pour poser une question
+        
+        Args:
+            user_question: La question de l'utilisateur
+            for_pdf: Si True, utilise le prompt PDF structuré, sinon utilise le prompt normal pour l'affichage web
+        """
         import threading
         import asyncio
+        
+        # Choisir le query engine approprié
+        engine_to_use = self.query_engine_pdf if (for_pdf and self.query_engine_pdf is not None) else self.query_engine
         
         # Créer un nouvel event loop dans un thread séparé pour éviter le conflit
         # avec l'event loop de FastAPI/uvicorn
@@ -794,7 +822,7 @@ class RenovationRAG:
                 asyncio.set_event_loop(new_loop)
                 try:
                     # Exécuter la requête (qui peut utiliser asyncio.run() en interne)
-                    result = self.query_engine.query(user_question)
+                    result = engine_to_use.query(user_question)
                     result_container['result'] = result
                 finally:
                     new_loop.close()

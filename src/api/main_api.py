@@ -644,13 +644,45 @@ Peux-tu me donner des conseils personnalisés de rénovation énergétique adapt
                     "download_url": f"{rag_api_url}/docs/{encoded_file_name}"
                 })
         
-        # Générer le PDF
+        # Générer le PDF avec un DEUXIÈME appel au RAG avec le prompt PDF structuré
         pdf_filename = None
         try:
+            print("\n📄 Génération du PDF avec prompt structuré...")
             outputs_dir = os.path.join(BASE_DIR, "outputs")
             os.makedirs(outputs_dir, exist_ok=True)
             pdf_filename = f"rapport_renovation_{os.urandom(8).hex()}.pdf"
             pdf_path = os.path.join(outputs_dir, pdf_filename)
+            
+            # DEUXIÈME APPEL : Requête RAG avec le prompt PDF structuré (pour le PDF uniquement)
+            print("🔍 Deuxième appel RAG (prompt PDF structuré)...")
+            pdf_start_time = time.time()
+            
+            try:
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    # Appel avec for_pdf=True pour utiliser le prompt PDF structuré
+                    pdf_response = await asyncio.wait_for(
+                        loop.run_in_executor(executor, rag_engine.query, question, True),  # for_pdf=True
+                        timeout=600.0  # 10 minutes
+                    )
+            except asyncio.TimeoutError:
+                elapsed_time = time.time() - pdf_start_time
+                print(f"❌ Timeout pour le PDF après {elapsed_time:.2f} secondes")
+                raise Exception(f"La requête RAG pour le PDF a pris plus de 10 minutes ({elapsed_time:.2f}s)")
+            except TimeoutError as e:
+                elapsed_time = time.time() - pdf_start_time
+                print(f"❌ Timeout pour le PDF dans le thread RAG après {elapsed_time:.2f} secondes")
+                raise Exception(f"La requête RAG pour le PDF a pris plus de 10 minutes ({elapsed_time:.2f}s)")
+            
+            pdf_elapsed_time = time.time() - pdf_start_time
+            print(f"✅ Réponse RAG PDF obtenue en {pdf_elapsed_time:.2f} secondes")
+            
+            # Extraire le texte de la réponse PDF
+            texte_pdf = ""
+            if hasattr(pdf_response, 'response'):
+                texte_pdf = str(pdf_response.response)
+                print(f"✅ Texte PDF extrait (longueur: {len(texte_pdf)} caractères)")
+            else:
+                texte_pdf = str(pdf_response)
             
             # Construire le prompt complet pour parser les infos du bâtiment (fallback)
             prompt_complet = question
@@ -702,8 +734,8 @@ DPE ACTUEL: {request.dpe_results.get('classe_dpe_finale', 'N/A')}
                     ges = dpe.get('emission_ges_chauffage_par_m2')
                     building_info['emissions_co2'] = f"{ges:.2f} kgCO2/m2" if ges is not None else 'N/A'
             
-            # Parser la réponse du RAG
-            parsed_response = parse_rag_response(texte_complet)
+            # Parser la réponse du RAG PDF (avec balises structurées)
+            parsed_response = parse_rag_response(texte_pdf)
             # Générer le PDF
             generate_renovation_pdf(building_info, parsed_response, pdf_path)
             print(f"✅ PDF généré avec succès: {pdf_filename}")
@@ -792,8 +824,9 @@ Peux-tu me donner des conseils personnalisés de rénovation énergétique adapt
         try:
             with ThreadPoolExecutor(max_workers=1) as executor:
                 # Exécuter avec un timeout asyncio de 10 minutes
+                # Pour /query/pdf, utiliser directement le prompt PDF (for_pdf=True)
                 response = await asyncio.wait_for(
-                    loop.run_in_executor(executor, rag_engine.query, question),
+                    loop.run_in_executor(executor, rag_engine.query, question, True),  # for_pdf=True
                     timeout=600.0  # 10 minutes
                 )
         except asyncio.TimeoutError:

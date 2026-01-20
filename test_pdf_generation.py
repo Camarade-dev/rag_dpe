@@ -23,7 +23,7 @@ if (BASE_DIR / "src").exists():
     sys.path.insert(0, str(BASE_DIR / "src"))
 
 # Configuration
-RAG_API_URL = os.getenv("RAG_API_URL", "RAG_API_URL=https://rag-dpe-1.onrender.com")
+RAG_API_URL = os.getenv("RAG_API_URL", "https://rag-dpe-1.onrender.com")
 TEST_OUTPUT_DIR = BASE_DIR / "test_outputs"
 TEST_OUTPUT_DIR.mkdir(exist_ok=True)
 
