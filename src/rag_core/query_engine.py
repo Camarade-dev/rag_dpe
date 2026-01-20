@@ -96,14 +96,14 @@ class HuggingFaceRouterLLM(CustomLLM):
     api_key: str = ""
     model_name: str = "Qwen/Qwen2.5-72B-Instruct"
     temperature: float = 0.1
-    max_new_tokens: int = 2048  # Augmenté de 512 à 2048 pour des réponses plus longues
+    max_new_tokens: int = 4096  # Augmenté à 4096 pour éviter les réponses tronquées
     
     def __init__(
         self,
         api_key: str,
         model_name: str = "Qwen/Qwen2.5-72B-Instruct",
         temperature: float = 0.1,
-        max_new_tokens: int = 2048,  # Augmenté de 512 à 2048 pour des réponses plus longues
+        max_new_tokens: int = 4096,  # Augmenté à 4096 pour éviter les réponses tronquées
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -146,6 +146,13 @@ class HuggingFaceRouterLLM(CustomLLM):
             "stream": False
         }
         
+        # LOGS DÉTAILLÉS de la requête
+        print(f"   📤 Requête LLM:")
+        print(f"      - Modèle: {self.model_name}")
+        print(f"      - Max tokens: {self.max_new_tokens}")
+        print(f"      - Taille prompt: {len(prompt)} caractères")
+        print(f"      - Aperçu prompt (200 chars): {prompt[:200]}...")
+        
         last_error = None
         
         for attempt in range(max_retries):
@@ -161,15 +168,72 @@ class HuggingFaceRouterLLM(CustomLLM):
                 
                 if response.status_code == 200:
                     data = response.json()
+                    
+                    # LOGS DÉTAILLÉS - Afficher toute la réponse de l'API
+                    print(f"   📥 Réponse API complète reçue:")
+                    print(f"      - Status: {response.status_code}")
+                    print(f"      - Taille réponse JSON: {len(str(data))} chars")
+                    print(f"      - Clés disponibles: {list(data.keys())}")
+                    
                     # Format OpenAI-compatible
                     choices = data.get("choices", [])
+                    print(f"      - Nombre de choices: {len(choices)}")
+                    
                     if choices and len(choices) > 0:
-                        text = choices[0].get("message", {}).get("content", "")
+                        choice = choices[0]
+                        print(f"      - Choice[0] clés: {list(choice.keys())}")
+                        
+                        # Vérifier le finish_reason pour détecter les troncatures
+                        finish_reason = choice.get("finish_reason", "unknown")
+                        print(f"      - Finish reason: {finish_reason}")
+                        
+                        if finish_reason == "length":
+                            print(f"      ⚠️  ATTENTION: Réponse tronquée à cause de la limite de tokens!")
+                            print(f"      💡 Augmentez HUGGINGFACE_MAX_TOKENS (actuellement: {self.max_new_tokens})")
+                        elif finish_reason == "stop":
+                            print(f"      ✅ Réponse complète (arrêt naturel)")
+                        else:
+                            print(f"      ℹ️  Finish reason: {finish_reason}")
+                        
+                        # Extraire le texte
+                        message = choice.get("message", {})
+                        print(f"      - Message clés: {list(message.keys())}")
+                        
+                        text = message.get("content", "")
+                        
                         if text:
-                            print(f"   Reponse LLM recue ({len(text)} chars)")
+                            # LOGS DÉTAILLÉS du texte reçu
+                            print(f"      ✅ Texte extrait: {len(text)} caractères")
+                            print(f"      📝 Aperçu début (200 chars): {text[:200]}")
+                            print(f"      📝 Aperçu fin (200 chars): {text[-200:] if len(text) > 200 else text}")
+                            
+                            # Compter les paragraphes pour détecter les troncatures
+                            paragraphs = text.split('\n\n')
+                            print(f"      📊 Nombre de paragraphes: {len(paragraphs)}")
+                            
+                            # Vérifier si le texte se termine de manière abrupte
+                            if not text.strip().endswith('.') and not text.strip().endswith('!') and not text.strip().endswith('?') and finish_reason == "length":
+                                print(f"      ⚠️  ALERTE: Le texte semble tronqué (ne se termine pas par ponctuation)")
+                            
+                            # Afficher les statistiques de tokens si disponibles
+                            usage = data.get("usage", {})
+                            if usage:
+                                print(f"      📊 Usage tokens:")
+                                print(f"         - Prompt tokens: {usage.get('prompt_tokens', 'N/A')}")
+                                print(f"         - Completion tokens: {usage.get('completion_tokens', 'N/A')}")
+                                print(f"         - Total tokens: {usage.get('total_tokens', 'N/A')}")
+                                if usage.get('completion_tokens'):
+                                    print(f"         - Ratio utilisé: {usage.get('completion_tokens')}/{self.max_new_tokens} ({usage.get('completion_tokens')/self.max_new_tokens*100:.1f}%)")
+                            
                             return text
-                    print(f"   Reponse vide: {str(data)[:200]}")
-                    last_error = "Reponse vide"
+                        else:
+                            print(f"      ❌ Texte vide dans message.content")
+                            print(f"      📋 Message complet: {str(message)[:500]}")
+                    else:
+                        print(f"      ❌ Aucune choice trouvée dans la réponse")
+                    
+                    print(f"      📋 Réponse API complète (premiers 1000 chars): {str(data)[:1000]}")
+                    last_error = "Reponse vide ou invalide"
                     continue
                 
                 elif response.status_code == 503:
@@ -425,8 +489,9 @@ class RenovationRAG:
             
             try:
                 # Augmenter max_new_tokens pour éviter les réponses tronquées
-                max_tokens = int(os.getenv("HUGGINGFACE_MAX_TOKENS", "2048"))
+                max_tokens = int(os.getenv("HUGGINGFACE_MAX_TOKENS", "4096"))
                 print(f"📊 Limite de tokens configurée : {max_tokens}")
+                print(f"💡 Pour des réponses plus longues, augmentez HUGGINGFACE_MAX_TOKENS (max recommandé: 8192)")
                 self.llm = HuggingFaceRouterLLM(
                     api_key=api_key,
                     model_name=model_name,

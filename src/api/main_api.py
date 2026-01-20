@@ -463,6 +463,36 @@ Peux-tu me donner des conseils personnalisés de rénovation énergétique adapt
             # L'attribut response contient le texte complet (même en mode streaming)
             texte_complet = str(response.response)
             print(f"✅ Texte extrait depuis response.response (longueur: {len(texte_complet)} caractères)")
+            
+            # LOGS DÉTAILLÉS - Analyser le contenu de la réponse
+            print(f"📊 Analyse de la réponse:")
+            print(f"   - Nombre de caractères: {len(texte_complet)}")
+            print(f"   - Nombre de mots: {len(texte_complet.split())}")
+            print(f"   - Nombre de lignes: {len(texte_complet.splitlines())}")
+            
+            # Vérifier si la réponse semble tronquée
+            paragraphs = [p for p in texte_complet.split('\n\n') if p.strip()]
+            print(f"   - Paragraphes détectés: {len(paragraphs)}")
+            
+            if len(paragraphs) > 0:
+                print(f"   - Premier paragraphe (100 chars): {paragraphs[0][:100]}...")
+                print(f"   - Dernier paragraphe (100 chars): {paragraphs[-1][:100]}...")
+                
+                # Vérifier si le dernier paragraphe se termine correctement
+                last_para = paragraphs[-1].strip()
+                ends_properly = last_para.endswith('.') or last_para.endswith('!') or last_para.endswith('?') or last_para.endswith(':')
+                if not ends_properly and len(texte_complet) > 500:
+                    print(f"   ⚠️  ALERTE: Le dernier paragraphe ne se termine pas par ponctuation - possible troncature!")
+                    print(f"      Derniers 200 chars: ...{texte_complet[-200:]}")
+            
+            # Afficher un aperçu du texte complet
+            print(f"📝 Aperçu complet de la réponse:")
+            print(f"   Début (300 chars): {texte_complet[:300]}")
+            if len(texte_complet) > 600:
+                print(f"   ...")
+                print(f"   Fin (300 chars): {texte_complet[-300:]}")
+            else:
+                print(f"   Fin: {texte_complet}")
         elif hasattr(response, 'response_gen'):
             # Mode streaming: collecter tous les tokens si response.response n'est pas disponible
             print("📡 Mode streaming détecté, collecte des tokens depuis response_gen...")
@@ -511,9 +541,26 @@ Peux-tu me donner des conseils personnalisés de rénovation énergétique adapt
                 print("❌ Impossible d'extraire le texte de la réponse RAG")
                 print(f"   Représentation de la réponse: {repr(response)}")
         
-        print(f"📝 Texte extrait (longueur: {len(texte_complet)} caractères)")
+        print(f"📝 Texte final extrait (longueur: {len(texte_complet)} caractères)")
+        
+        # Vérification finale de la troncature
+        if len(texte_complet) > 0:
+            # Compter les sections/paragraphes numérotés
+            import re
+            numbered_sections = re.findall(r'^\d+\.\s+\*\*', texte_complet, re.MULTILINE)
+            print(f"   - Sections numérotées détectées: {len(numbered_sections)}")
+            
+            # Chercher des patterns de troncature
+            if texte_complet.strip().endswith('...') or texte_complet.strip().endswith('…'):
+                print(f"   ⚠️  ALERTE: Le texte se termine par '...' - possible troncature!")
+            
+            # Vérifier la présence de balises de fin attendues
+            if '[ANALYSE]' in texte_complet or '[SCENARIO' in texte_complet:
+                if '[/ANALYSE]' not in texte_complet and '[/SCENARIO_1]' not in texte_complet and '[/SCENARIO_2]' not in texte_complet:
+                    print(f"   ⚠️  ALERTE: Balises de structure non fermées - possible troncature!")
+        
         if len(texte_complet) < 100:
-            print(f"   Aperçu: {texte_complet[:200]}")
+            print(f"   Aperçu complet: {texte_complet[:200]}")
         
         # Extraire les sources
         sources = []
@@ -722,9 +769,26 @@ Peux-tu me donner des conseils personnalisés de rénovation énergétique adapt
                 print("❌ Impossible d'extraire le texte de la réponse RAG")
                 print(f"   Représentation de la réponse: {repr(response)}")
         
-        print(f"📝 Texte extrait (longueur: {len(texte_complet)} caractères)")
+        print(f"📝 Texte final extrait (longueur: {len(texte_complet)} caractères)")
+        
+        # Vérification finale de la troncature
+        if len(texte_complet) > 0:
+            # Compter les sections/paragraphes numérotés
+            import re
+            numbered_sections = re.findall(r'^\d+\.\s+\*\*', texte_complet, re.MULTILINE)
+            print(f"   - Sections numérotées détectées: {len(numbered_sections)}")
+            
+            # Chercher des patterns de troncature
+            if texte_complet.strip().endswith('...') or texte_complet.strip().endswith('…'):
+                print(f"   ⚠️  ALERTE: Le texte se termine par '...' - possible troncature!")
+            
+            # Vérifier la présence de balises de fin attendues
+            if '[ANALYSE]' in texte_complet or '[SCENARIO' in texte_complet:
+                if '[/ANALYSE]' not in texte_complet and '[/SCENARIO_1]' not in texte_complet and '[/SCENARIO_2]' not in texte_complet:
+                    print(f"   ⚠️  ALERTE: Balises de structure non fermées - possible troncature!")
+        
         if len(texte_complet) < 100:
-            print(f"   Aperçu: {texte_complet[:200]}")
+            print(f"   Aperçu complet: {texte_complet[:200]}")
         
         # Extraire les sources
         sources = []
