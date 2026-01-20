@@ -114,8 +114,8 @@ def check_and_ingest_if_needed():
         return False
 
 
-async def _initialize_rag_background():
-    """Initialise le RAG en arrière-plan (non-bloquant)"""
+def _initialize_rag_background():
+    """Initialise le RAG en arrière-plan (fonction synchrone pour run_in_executor)"""
     global rag_engine
     try:
         print("=" * 60)
