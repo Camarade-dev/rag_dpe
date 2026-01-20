@@ -16,7 +16,7 @@ os.environ["ALLOW_RESET"] = "TRUE"
 import logging
 logging.getLogger("chromadb.telemetry").setLevel(logging.CRITICAL)
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -436,7 +436,7 @@ async def trigger_ingest(force: bool = False, max_docs: int = 50):
         raise HTTPException(status_code=500, detail=f"Erreur lors de l'ingestion: {str(e)}")
 
 @app.post("/query", response_model=RAGResponse)
-async def query_rag(request: RAGRequest):
+async def query_rag(request: RAGRequest, http_request: Request = None):
     """
     Pose une question au système RAG et retourne une réponse avec sources
     """
@@ -600,14 +600,38 @@ Peux-tu me donner des conseils personnalisés de rénovation énergétique adapt
         if len(texte_complet) < 100:
             print(f"   Aperçu complet: {texte_complet[:200]}")
         
-        # Extraire les sources
+        # Extraire les sources avec URL de téléchargement
         sources = []
+        # Obtenir l'URL de base de l'API RAG (pour les liens de téléchargement)
+        # Priorité: variable d'environnement RAG_PUBLIC_URL, sinon construire depuis la requête HTTP
+        rag_api_url = os.getenv("RAG_PUBLIC_URL")
+        if not rag_api_url and http_request:
+            # Construire l'URL depuis la requête HTTP (fonctionne en local et sur Render)
+            scheme = http_request.url.scheme
+            host = http_request.headers.get("host", http_request.url.hostname)
+            if host:
+                rag_api_url = f"{scheme}://{host}"
+        if not rag_api_url:
+            # Fallback: essayer RAG_API_URL (peut être utilisé pour l'appel interne)
+            rag_api_url = os.getenv("RAG_API_URL", "http://localhost:8002")
+            # Si on est sur Render, utiliser l'URL publique (sans http://)
+            if not rag_api_url.startswith("http"):
+                rag_api_url = f"https://{rag_api_url}"
+        # S'assurer que l'URL se termine sans slash
+        rag_api_url = rag_api_url.rstrip('/')
+        
         if hasattr(response, 'source_nodes') and response.source_nodes:
             for node in response.source_nodes:
+                file_name = node.metadata.get('file_name', 'Inconnu')
+                # Encoder le nom du fichier pour l'URL (gérer les espaces et caractères spéciaux)
+                from urllib.parse import quote
+                encoded_file_name = quote(file_name, safe='')
+                
                 sources.append({
-                    "file_name": node.metadata.get('file_name', 'Inconnu'),
+                    "file_name": file_name,
                     "page": node.metadata.get('page_label', '?'),
-                    "score": float(node.score) if node.score else 0.0
+                    "score": float(node.score) if node.score else 0.0,
+                    "download_url": f"{rag_api_url}/docs/{encoded_file_name}"
                 })
         
         # Générer le PDF
@@ -618,10 +642,10 @@ Peux-tu me donner des conseils personnalisés de rénovation énergétique adapt
             pdf_filename = f"rapport_renovation_{os.urandom(8).hex()}.pdf"
             pdf_path = os.path.join(outputs_dir, pdf_filename)
             
-            # Construire le prompt complet pour parser les infos du bâtiment
+            # Construire le prompt complet pour parser les infos du bâtiment (fallback)
             prompt_complet = question
             if request.dpe_results:
-                # Ajouter les infos DPE au prompt pour le parsing
+                # Ajouter les infos DPE au prompt pour le parsing (fallback si données manquantes)
                 dpe_info = f"""
 DPE ACTUEL: {request.dpe_results.get('classe_dpe_finale', 'N/A')}
 """
@@ -629,41 +653,44 @@ DPE ACTUEL: {request.dpe_results.get('classe_dpe_finale', 'N/A')}
                     dpe_info += f"Surface: {request.dpe_results.get('surface_habitable_logement')} m2\n"
                 prompt_complet = dpe_info + prompt_complet
             
-            # Parser les informations du bâtiment depuis la question et les résultats DPE
+            # Parser les informations du bâtiment depuis la question (fallback)
             building_info = parse_building_info(prompt_complet)
-            # Enrichir avec les données DPE si disponibles (priorité aux données DPE réelles)
+            
+            # PRIORITÉ: Enrichir avec les données DPE si disponibles (remplace les valeurs extraites du prompt)
             if request.dpe_results:
+                dpe = request.dpe_results
+                
                 # Classe DPE actuelle
-                if 'classe_dpe_finale' in request.dpe_results:
-                    building_info['dpe_actuel'] = request.dpe_results.get('classe_dpe_finale', 'N/A')
-                elif 'etiquette_energie' in request.dpe_results:
-                    building_info['dpe_actuel'] = request.dpe_results.get('etiquette_energie', 'N/A')
+                if dpe.get('classe_dpe_finale'):
+                    building_info['dpe_actuel'] = str(dpe.get('classe_dpe_finale'))
+                elif dpe.get('etiquette_energie'):
+                    building_info['dpe_actuel'] = str(dpe.get('etiquette_energie'))
                 
                 # Département (depuis code_departement_ban si disponible)
-                if 'code_departement_ban' in request.dpe_results:
-                    building_info['departement'] = str(request.dpe_results.get('code_departement_ban', 'N/A'))
+                if dpe.get('code_departement_ban') is not None:
+                    building_info['departement'] = str(dpe.get('code_departement_ban'))
                 
                 # Année de construction
-                if 'annee_construction' in request.dpe_results:
-                    building_info['annee'] = str(request.dpe_results.get('annee_construction', 'N/A'))
+                if dpe.get('annee_construction') is not None:
+                    building_info['annee'] = str(dpe.get('annee_construction'))
                 
                 # Surface
-                if 'surface_habitable_logement' in request.dpe_results:
-                    surface = request.dpe_results.get('surface_habitable_logement')
+                if dpe.get('surface_habitable_logement') is not None:
+                    surface = dpe.get('surface_habitable_logement')
                     building_info['surface'] = f"{surface} m2" if surface else 'N/A'
                 
                 # Données techniques
-                if 'ubat_w_par_m2_k' in request.dpe_results:
-                    ubat = request.dpe_results.get('ubat_w_par_m2_k')
-                    building_info['ubat'] = f"{ubat:.2f} W/m2.K" if ubat else 'N/A'
+                if dpe.get('ubat_w_par_m2_k') is not None:
+                    ubat = dpe.get('ubat_w_par_m2_k')
+                    building_info['ubat'] = f"{ubat:.2f} W/m2.K" if ubat is not None else 'N/A'
                 
-                if 'conso_chauffage_ep_par_m2' in request.dpe_results:
-                    conso = request.dpe_results.get('conso_chauffage_ep_par_m2')
-                    building_info['conso_chauffage'] = f"{conso:.1f} kWhEP/m2" if conso else 'N/A'
+                if dpe.get('conso_chauffage_ep_par_m2') is not None:
+                    conso = dpe.get('conso_chauffage_ep_par_m2')
+                    building_info['conso_chauffage'] = f"{conso:.2f} kWhEP/m2" if conso is not None else 'N/A'
                 
-                if 'emission_ges_chauffage_par_m2' in request.dpe_results:
-                    ges = request.dpe_results.get('emission_ges_chauffage_par_m2')
-                    building_info['emissions_co2'] = f"{ges:.1f} kgCO2/m2" if ges else 'N/A'
+                if dpe.get('emission_ges_chauffage_par_m2') is not None:
+                    ges = dpe.get('emission_ges_chauffage_par_m2')
+                    building_info['emissions_co2'] = f"{ges:.2f} kgCO2/m2" if ges is not None else 'N/A'
             
             # Parser la réponse du RAG
             parsed_response = parse_rag_response(texte_complet)
@@ -715,7 +742,7 @@ async def download_pdf(filename: str):
     )
 
 @app.post("/query/pdf")
-async def query_rag_and_generate_pdf(request: RAGRequest):
+async def query_rag_and_generate_pdf(request: RAGRequest, http_request: Request = None):
     """
     Pose une question au système RAG, génère une réponse et crée un PDF du rapport
     """
@@ -851,14 +878,38 @@ Peux-tu me donner des conseils personnalisés de rénovation énergétique adapt
         if len(texte_complet) < 100:
             print(f"   Aperçu complet: {texte_complet[:200]}")
         
-        # Extraire les sources
+        # Extraire les sources avec URL de téléchargement
         sources = []
+        # Obtenir l'URL de base de l'API RAG (pour les liens de téléchargement)
+        # Priorité: variable d'environnement RAG_PUBLIC_URL, sinon construire depuis la requête HTTP
+        rag_api_url = os.getenv("RAG_PUBLIC_URL")
+        if not rag_api_url and http_request:
+            # Construire l'URL depuis la requête HTTP (fonctionne en local et sur Render)
+            scheme = http_request.url.scheme
+            host = http_request.headers.get("host", http_request.url.hostname)
+            if host:
+                rag_api_url = f"{scheme}://{host}"
+        if not rag_api_url:
+            # Fallback: essayer RAG_API_URL (peut être utilisé pour l'appel interne)
+            rag_api_url = os.getenv("RAG_API_URL", "http://localhost:8002")
+            # Si on est sur Render, utiliser l'URL publique (sans http://)
+            if not rag_api_url.startswith("http"):
+                rag_api_url = f"https://{rag_api_url}"
+        # S'assurer que l'URL se termine sans slash
+        rag_api_url = rag_api_url.rstrip('/')
+        
         if hasattr(response, 'source_nodes') and response.source_nodes:
             for node in response.source_nodes:
+                file_name = node.metadata.get('file_name', 'Inconnu')
+                # Encoder le nom du fichier pour l'URL (gérer les espaces et caractères spéciaux)
+                from urllib.parse import quote
+                encoded_file_name = quote(file_name, safe='')
+                
                 sources.append({
-                    "file_name": node.metadata.get('file_name', 'Inconnu'),
+                    "file_name": file_name,
                     "page": node.metadata.get('page_label', '?'),
-                    "score": float(node.score) if node.score else 0.0
+                    "score": float(node.score) if node.score else 0.0,
+                    "download_url": f"{rag_api_url}/docs/{encoded_file_name}"
                 })
         
         # Générer le PDF
