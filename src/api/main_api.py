@@ -170,15 +170,25 @@ async def lifespan(app: FastAPI):
     global rag_engine
     rag_engine = None  # Initialiser à None
     
-    # Démarrer l'initialisation du RAG en arrière-plan (non-bloquant)
-    # Cela permet à Render de détecter le port rapidement
-    import asyncio
-    asyncio.create_task(_initialize_rag_background())
-    
     port = os.getenv("PORT", "8002")
     print(f"🚀 API démarrée rapidement sur le port {port}")
-    print(f"⏳ Initialisation du RAG en cours en arrière-plan...")
     print(f"💡 L'endpoint /health répond immédiatement")
+    
+    # IMPORTANT: Lancer l'initialisation du RAG dans un thread séparé APRÈS le yield
+    # pour que uvicorn démarre complètement et que Render détecte le port immédiatement
+    import asyncio
+    
+    async def start_rag_init():
+        # Attendre 1 seconde pour s'assurer que uvicorn démarre complètement
+        await asyncio.sleep(1)
+        print(f"⏳ Initialisation du RAG en cours en arrière-plan (thread séparé)...")
+        # Exécuter l'initialisation dans un thread séparé pour ne pas bloquer l'event loop
+        loop = asyncio.get_event_loop()
+        from concurrent.futures import ThreadPoolExecutor
+        loop.run_in_executor(None, _initialize_rag_background)
+    
+    # Lancer l'initialisation en arrière-plan (non-bloquant)
+    asyncio.create_task(start_rag_init())
     
     yield
     # Shutdown (nettoyage si nécessaire)
