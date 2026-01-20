@@ -160,21 +160,137 @@ def parse_rag_response(response_text):
     # Analyse
     result['analyse'] = _extract_section(response_text, 'ANALYSE', '/ANALYSE')
     
-    # Scénario 1
+    # Scénario 1 - avec balises structurées
     s1_text = _extract_section(response_text, 'SCENARIO_1', '/SCENARIO_1')
     if s1_text:
         _parse_scenario(s1_text, result['scenario_1'], 'Aide_CEE')
     
-    # Scénario 2
+    # Scénario 2 - avec balises structurées
     s2_text = _extract_section(response_text, 'SCENARIO_2', '/SCENARIO_2')
     if s2_text:
         _parse_scenario(s2_text, result['scenario_2'], 'Aide_MaPrimeRenov')
     
-    # Fallback si pas de structure
+    # FALLBACK: Si pas de balises structurées, essayer d'extraire depuis le texte libre
+    if not s1_text and not s2_text:
+        # Essayer d'extraire les scénarios depuis le texte libre
+        _extract_scenarios_from_free_text(response_text, result)
+    
+    # Fallback si pas de structure du tout
     if not result['analyse'] and not result['scenario_1']['description']:
         result['analyse'] = response_text[:800] if len(response_text) > 800 else response_text
     
     return result
+
+
+def _extract_scenarios_from_free_text(text, result):
+    """Extrait les scénarios et métriques depuis un texte libre (sans balises structurées)."""
+    # Nettoyer le texte
+    clean_text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)
+    clean_text = re.sub(r'\*([^*]+)\*', r'\1', clean_text)
+    
+    # Diviser le texte en sections potentielles (scénarios)
+    # Chercher des patterns comme "Scénario 1", "1.", "a.", "b.", etc.
+    scenarios_pattern = r'(?:Scénario\s*[12]|^\s*[12]\.|^\s*[ab]\.|^\s*-\s*Scénario)\s*[:\-]?\s*(.+?)(?=(?:Scénario|^\s*[12]\.|^\s*[ab]\.|^\s*-\s*Scénario|$))'
+    scenarios = re.findall(scenarios_pattern, clean_text, re.MULTILINE | re.IGNORECASE | re.DOTALL)
+    
+    # Si on trouve des scénarios, essayer d'extraire les informations
+    if len(scenarios) >= 1:
+        scenario_1_text = scenarios[0]  # re.findall retourne juste la chaîne capturée
+        _extract_metrics_from_free_text(scenario_1_text, result['scenario_1'], 'CEE')
+    
+    if len(scenarios) >= 2:
+        scenario_2_text = scenarios[1]
+        _extract_metrics_from_free_text(scenario_2_text, result['scenario_2'], 'MaPrimeRenov')
+    
+    # Si pas de scénarios détectés, essayer une approche plus générale
+    if not result['scenario_1']['description'] and not result['scenario_2']['description']:
+        # Chercher des mentions de coûts, aides, économies dans tout le texte
+        _extract_global_metrics_from_text(clean_text, result)
+
+
+def _extract_metrics_from_free_text(text, scenario_dict, aide_type):
+    """Extrait les métriques financières depuis un texte libre."""
+    # Extraire la description (tout le texte jusqu'aux premières métriques)
+    desc_parts = []
+    lines = text.split('\n')
+    for line in lines[:10]:  # Prendre les 10 premières lignes comme description
+        line = line.strip()
+        if line and not _looks_like_metric(line):
+            desc_parts.append(line)
+    if desc_parts:
+        scenario_dict['description'] = ' '.join(desc_parts)[:500]  # Limiter à 500 chars
+    
+    # Chercher les métriques financières avec des patterns flexibles
+    # Coût estimé
+    cost_patterns = [
+        r'(?:coût|cout|prix|budget|investissement)[\s:]*[de\s]*[environ\s]*([0-9\s]+(?:\s*[kK]?\s*€|euros?|EUR))',
+        r'([0-9\s]+(?:\s*[kK]?\s*€|euros?|EUR))[\s,]*[pour\s]*(?:les\s*)?travaux',
+        r'([0-9\s]+(?:\s*[kK]?\s*€|euros?|EUR))[\s,]*[de\s]*(?:coût|cout|prix|budget)'
+    ]
+    for pattern in cost_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            cost = match.group(1).strip()
+            scenario_dict['cout_estime'] = cost
+            break
+    
+    # Aide financière
+    aide_patterns = [
+        r'(?:aide|subvention|prime|CEE|MaPrimeRenov)[\s:]*[de\s]*[environ\s]*([0-9\s]+(?:\s*[kK]?\s*€|euros?|EUR|%))',
+        r'([0-9\s]+(?:\s*[kK]?\s*€|euros?|EUR|%))[\s,]*[d\']?(?:aide|subvention|prime|CEE|MaPrimeRenov)',
+        r'(?:jusqu\'?à|maximum|max)[\s]*([0-9\s]+(?:\s*[kK]?\s*€|euros?|EUR))[\s,]*[d\']?(?:aide|subvention|prime)'
+    ]
+    for pattern in aide_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            aide = match.group(1).strip()
+            scenario_dict['aide_montant'] = aide
+            break
+    
+    # Économies annuelles
+    econ_patterns = [
+        r'(?:économie|economie|épargne|gain)[s]?[\s:]*[annuelle|annuel|par\s*an][s]?[\s:]*[de\s]*[environ\s]*([0-9\s]+(?:\s*[kK]?\s*€|euros?|EUR))',
+        r'([0-9\s]+(?:\s*[kK]?\s*€|euros?|EUR))[\s,]*[d\']?(?:économie|economie|épargne|gain)[s]?[\s,]*[annuelle|annuel|par\s*an]',
+        r'(?:réduire|diminuer|baisser)[\s]*[la\s]*[facture|consommation][\s]*[de\s]*([0-9\s]+(?:\s*[kK]?\s*€|euros?|EUR))'
+    ]
+    for pattern in econ_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            econ = match.group(1).strip()
+            scenario_dict['economies_annuelles'] = econ
+            break
+    
+    # Rentabilité / Retour sur investissement
+    roi_patterns = [
+        r'(?:retour|rentabilité|rentabilite|amortissement)[\s:]*[sur\s]*[l\']?[investissement]?[\s:]*[de\s]*[environ\s]*([0-9\s]+(?:\s*ans?|années?|année))',
+        r'([0-9\s]+(?:\s*ans?|années?|année))[\s,]*[de\s]*(?:retour|rentabilité|rentabilite|amortissement)',
+        r'amorti[s]?[\s]*[en\s]*([0-9\s]+(?:\s*ans?|années?|année))'
+    ]
+    for pattern in roi_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            roi = match.group(1).strip()
+            scenario_dict['rentabilite'] = roi
+            break
+    
+    # Classe visée
+    classe_match = re.search(r'(?:classe|étiquette|etiquette)[\s]*(?:énergétique|energetique)?[\s]*(?:visée|visee|cible|objectif)[\s:]*[de\s]*([A-G])', text, re.IGNORECASE)
+    if classe_match:
+        scenario_dict['classe_visee'] = classe_match.group(1).upper()
+
+
+def _looks_like_metric(line):
+    """Vérifie si une ligne ressemble à une métrique financière."""
+    metric_indicators = ['€', 'euro', 'EUR', 'coût', 'cout', 'prix', 'budget', 'aide', 'subvention', 
+                        'économie', 'economie', 'retour', 'rentabilité', 'rentabilite', 'amortissement']
+    return any(indicator.lower() in line.lower() for indicator in metric_indicators)
+
+
+def _extract_global_metrics_from_text(text, result):
+    """Extrait les métriques globales depuis tout le texte si aucun scénario n'est détecté."""
+    # Chercher des mentions générales de coûts, aides, économies
+    # et les appliquer au premier scénario par défaut
+    _extract_metrics_from_free_text(text, result['scenario_1'], 'CEE')
 
 
 def _parse_scenario(scenario_text, scenario_dict, aide_key):
