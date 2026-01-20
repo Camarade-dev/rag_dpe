@@ -19,6 +19,12 @@ def sanitize_text(text):
     
     text = str(text)
     
+    # Nettoyer les balises markdown ** et * en premier
+    text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)  # **texte** -> texte
+    text = re.sub(r'\*([^*]+)\*', r'\1', text)      # *texte* -> texte
+    text = re.sub(r'\*\*+', '', text)               # ** restants
+    text = re.sub(r'\*+', '', text)                  # * restants
+    
     replacements = {
         'é': 'e', 'è': 'e', 'ê': 'e', 'ë': 'e',
         'à': 'a', 'â': 'a', 'ä': 'a',
@@ -174,49 +180,79 @@ def parse_rag_response(response_text):
 def _parse_scenario(scenario_text, scenario_dict, aide_key):
     """Parse un scénario individuel avec tous les nouveaux champs."""
     
-    # Nettoyer le markdown ** des labels
+    # Nettoyer TOUTES les balises markdown ** (même imbriquées ou multiples)
+    # Remplacer **texte** par texte (gras)
     clean_text = re.sub(r'\*\*([^*]+)\*\*', r'\1', scenario_text)
+    # Remplacer *texte* par texte (italique)
+    clean_text = re.sub(r'\*([^*]+)\*', r'\1', clean_text)
+    # Nettoyer les ** restants (cas où il y a des ** isolés)
+    clean_text = re.sub(r'\*\*+', '', clean_text)
+    clean_text = re.sub(r'\*+', '', clean_text)
     
     # Titre
     match = re.search(r'Titre:\s*(.+?)(?:\n|$)', clean_text)
     if match:
         scenario_dict['titre'] = match.group(1).strip()
     
-    # Description - capture jusqu'à Classe_Visee
-    match = re.search(r'Description:\s*(.+?)(?=Classe_Visee:|$)', clean_text, re.DOTALL)
+    # Description - capture jusqu'à Classe_Visee ou Classe energetique visee
+    match = re.search(r'Description:\s*(.+?)(?=Classe[_\s]*(?:Visee|energetique[_\s]*visee):|$)', clean_text, re.DOTALL | re.IGNORECASE)
     if match:
         desc = match.group(1).strip()
+        # Nettoyer les balises markdown ** et *
+        desc = re.sub(r'\*\*([^*]+)\*\*', r'\1', desc)
+        desc = re.sub(r'\*([^*]+)\*', r'\1', desc)
+        desc = re.sub(r'\*\*+', '', desc)
+        desc = re.sub(r'\*+', '', desc)
         # Nettoyer les sauts de ligne multiples et les bullets markdown
         desc = re.sub(r'\n\s*\n', '\n', desc)
         desc = re.sub(r'^\s*\*\s*', '- ', desc, flags=re.MULTILINE)
         scenario_dict['description'] = desc
     
-    # Classe visée
-    match = re.search(r'Classe_Visee:\s*\[?([A-G])\]?', clean_text, re.IGNORECASE)
+    # Classe visée - patterns plus flexibles
+    match = re.search(r'Classe[_\s]*Visee[_\s]*:\s*\[?([A-G])\]?', clean_text, re.IGNORECASE)
     if match:
         scenario_dict['classe_visee'] = match.group(1).upper()
+    else:
+        # Essayer avec "Classe energetique visee"
+        match = re.search(r'Classe[_\s]*energetique[_\s]*visee[_\s]*:\s*\[?([A-G])\]?', clean_text, re.IGNORECASE)
+        if match:
+            scenario_dict['classe_visee'] = match.group(1).upper()
     
-    # Coût estimé - prendre juste le nombre
-    match = re.search(r'Cout_Estime:\s*\[?([^\]\n]+)\]?', clean_text)
+    # Coût estimé - patterns plus flexibles
+    match = re.search(r'Cout[_\s]*Estime[_\s]*:\s*\[?([^\]\n]+)\]?', clean_text, re.IGNORECASE)
     if match:
         cout = match.group(1).strip()
-        # Enlever le symbole EUR si présent pour cohérence
+        # Nettoyer les balises markdown restantes
+        cout = re.sub(r'\*\*+', '', cout)
+        cout = re.sub(r'\*+', '', cout)
         scenario_dict['cout_estime'] = cout
     
-    # Aide financière
-    match = re.search(rf'{aide_key}:\s*\[?([^\]\n]+)\]?', clean_text)
+    # Aide financière - patterns plus flexibles
+    match = re.search(rf'{aide_key}[_\s]*:\s*\[?([^\]\n]+)\]?', clean_text, re.IGNORECASE)
     if match:
-        scenario_dict['aide_montant'] = match.group(1).strip()
+        aide = match.group(1).strip()
+        # Nettoyer les balises markdown restantes
+        aide = re.sub(r'\*\*+', '', aide)
+        aide = re.sub(r'\*+', '', aide)
+        scenario_dict['aide_montant'] = aide
     
-    # Économies annuelles
-    match = re.search(r'Economies_Annuelles:\s*\[?([^\]\n]+)\]?', clean_text)
+    # Économies annuelles - patterns plus flexibles
+    match = re.search(r'Economies[_\s]*Annuelles[_\s]*:\s*\[?([^\]\n]+)\]?', clean_text, re.IGNORECASE)
     if match:
-        scenario_dict['economies_annuelles'] = match.group(1).strip()
+        econ = match.group(1).strip()
+        # Nettoyer les balises markdown restantes
+        econ = re.sub(r'\*\*+', '', econ)
+        econ = re.sub(r'\*+', '', econ)
+        scenario_dict['economies_annuelles'] = econ
     
-    # Rentabilité
-    match = re.search(r'Rentabilite:\s*\[?([^\]\n]+)\]?', clean_text)
+    # Rentabilité - patterns plus flexibles
+    match = re.search(r'Rentabilite[_\s]*:\s*\[?([^\]\n]+)\]?', clean_text, re.IGNORECASE)
     if match:
-        scenario_dict['rentabilite'] = match.group(1).strip()
+        rent = match.group(1).strip()
+        # Nettoyer les balises markdown restantes
+        rent = re.sub(r'\*\*+', '', rent)
+        rent = re.sub(r'\*+', '', rent)
+        scenario_dict['rentabilite'] = rent
 
 
 def generate_renovation_pdf(building_info, parsed_response, output_path):

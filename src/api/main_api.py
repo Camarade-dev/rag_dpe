@@ -114,14 +114,12 @@ def check_and_ingest_if_needed():
         return False
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Gestion du cycle de vie de l'application"""
+async def _initialize_rag_background():
+    """Initialise le RAG en arrière-plan (non-bloquant)"""
     global rag_engine
-    # Startup
     try:
         print("=" * 60)
-        print("🔧 Initialisation du moteur RAG...")
+        print("🔧 Initialisation du moteur RAG en arrière-plan...")
         print("=" * 60)
         print(f"📊 USE_API_EMBEDDINGS={os.getenv('USE_API_EMBEDDINGS', 'non définie')}")
         print(f"📊 LLM_PROVIDER={os.getenv('LLM_PROVIDER', 'non définie')}")
@@ -165,6 +163,23 @@ async def lifespan(app: FastAPI):
         rag_engine = None
         port = os.getenv("PORT", "8002")
         print(f"🌐 L'API est quand même accessible sur le port {port} (mais le RAG ne fonctionnera pas)")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Gestion du cycle de vie de l'application - démarrage rapide pour Render"""
+    global rag_engine
+    rag_engine = None  # Initialiser à None
+    
+    # Démarrer l'initialisation du RAG en arrière-plan (non-bloquant)
+    # Cela permet à Render de détecter le port rapidement
+    import asyncio
+    asyncio.create_task(_initialize_rag_background())
+    
+    port = os.getenv("PORT", "8002")
+    print(f"🚀 API démarrée rapidement sur le port {port}")
+    print(f"⏳ Initialisation du RAG en cours en arrière-plan...")
+    print(f"💡 L'endpoint /health répond immédiatement")
+    
     yield
     # Shutdown (nettoyage si nécessaire)
     pass
@@ -178,7 +193,18 @@ async def health_check():
     return {
         "status": "ok",
         "rag_initialized": rag_engine is not None,
-        "port": os.getenv("PORT", "8002")
+        "port": os.getenv("PORT", "8002"),
+        "message": "API is running" if rag_engine is None else "API and RAG are ready"
+    }
+
+# Endpoint racine pour vérifier que l'API répond
+@app.get("/")
+async def root():
+    """Endpoint racine - répond immédiatement"""
+    return {
+        "status": "ok",
+        "service": "RAG API",
+        "rag_ready": rag_engine is not None
     }
 
 # Servir les fichiers PDF statiques
@@ -605,16 +631,39 @@ DPE ACTUEL: {request.dpe_results.get('classe_dpe_finale', 'N/A')}
             
             # Parser les informations du bâtiment depuis la question et les résultats DPE
             building_info = parse_building_info(prompt_complet)
-            # Enrichir avec les données DPE si disponibles
+            # Enrichir avec les données DPE si disponibles (priorité aux données DPE réelles)
             if request.dpe_results:
+                # Classe DPE actuelle
+                if 'classe_dpe_finale' in request.dpe_results:
+                    building_info['dpe_actuel'] = request.dpe_results.get('classe_dpe_finale', 'N/A')
+                elif 'etiquette_energie' in request.dpe_results:
+                    building_info['dpe_actuel'] = request.dpe_results.get('etiquette_energie', 'N/A')
+                
+                # Département (depuis code_departement_ban si disponible)
+                if 'code_departement_ban' in request.dpe_results:
+                    building_info['departement'] = str(request.dpe_results.get('code_departement_ban', 'N/A'))
+                
+                # Année de construction
+                if 'annee_construction' in request.dpe_results:
+                    building_info['annee'] = str(request.dpe_results.get('annee_construction', 'N/A'))
+                
+                # Surface
                 if 'surface_habitable_logement' in request.dpe_results:
-                    building_info['surface'] = f"{request.dpe_results.get('surface_habitable_logement')} m2"
+                    surface = request.dpe_results.get('surface_habitable_logement')
+                    building_info['surface'] = f"{surface} m2" if surface else 'N/A'
+                
+                # Données techniques
                 if 'ubat_w_par_m2_k' in request.dpe_results:
-                    building_info['ubat'] = f"{request.dpe_results.get('ubat_w_par_m2_k')} W/m2.K"
+                    ubat = request.dpe_results.get('ubat_w_par_m2_k')
+                    building_info['ubat'] = f"{ubat:.2f} W/m2.K" if ubat else 'N/A'
+                
                 if 'conso_chauffage_ep_par_m2' in request.dpe_results:
-                    building_info['conso_chauffage'] = f"{request.dpe_results.get('conso_chauffage_ep_par_m2')} kWhEP/m2"
+                    conso = request.dpe_results.get('conso_chauffage_ep_par_m2')
+                    building_info['conso_chauffage'] = f"{conso:.1f} kWhEP/m2" if conso else 'N/A'
+                
                 if 'emission_ges_chauffage_par_m2' in request.dpe_results:
-                    building_info['emissions_co2'] = f"{request.dpe_results.get('emission_ges_chauffage_par_m2')} kgCO2/m2"
+                    ges = request.dpe_results.get('emission_ges_chauffage_par_m2')
+                    building_info['emissions_co2'] = f"{ges:.1f} kgCO2/m2" if ges else 'N/A'
             
             # Parser la réponse du RAG
             parsed_response = parse_rag_response(texte_complet)
@@ -819,8 +868,53 @@ Peux-tu me donner des conseils personnalisés de rénovation énergétique adapt
         pdf_path = os.path.join(outputs_dir, pdf_filename)
         
         try:
-            # Parser les informations du bâtiment depuis la question
-            building_info = parse_building_info(question)
+            # Construire le prompt complet pour parser les infos du bâtiment
+            prompt_complet = question
+            if request.dpe_results:
+                # Ajouter les infos DPE au prompt pour le parsing
+                dpe_info = f"""
+DPE ACTUEL: {request.dpe_results.get('classe_dpe_finale', 'N/A')}
+"""
+                if 'surface_habitable_logement' in request.dpe_results:
+                    dpe_info += f"Surface: {request.dpe_results.get('surface_habitable_logement')} m2\n"
+                prompt_complet = dpe_info + prompt_complet
+            
+            # Parser les informations du bâtiment depuis la question et les résultats DPE
+            building_info = parse_building_info(prompt_complet)
+            # Enrichir avec les données DPE si disponibles (priorité aux données DPE réelles)
+            if request.dpe_results:
+                # Classe DPE actuelle
+                if 'classe_dpe_finale' in request.dpe_results:
+                    building_info['dpe_actuel'] = request.dpe_results.get('classe_dpe_finale', 'N/A')
+                elif 'etiquette_energie' in request.dpe_results:
+                    building_info['dpe_actuel'] = request.dpe_results.get('etiquette_energie', 'N/A')
+                
+                # Département (depuis code_departement_ban si disponible)
+                if 'code_departement_ban' in request.dpe_results:
+                    building_info['departement'] = str(request.dpe_results.get('code_departement_ban', 'N/A'))
+                
+                # Année de construction
+                if 'annee_construction' in request.dpe_results:
+                    building_info['annee'] = str(request.dpe_results.get('annee_construction', 'N/A'))
+                
+                # Surface
+                if 'surface_habitable_logement' in request.dpe_results:
+                    surface = request.dpe_results.get('surface_habitable_logement')
+                    building_info['surface'] = f"{surface} m2" if surface else 'N/A'
+                
+                # Données techniques
+                if 'ubat_w_par_m2_k' in request.dpe_results:
+                    ubat = request.dpe_results.get('ubat_w_par_m2_k')
+                    building_info['ubat'] = f"{ubat:.2f} W/m2.K" if ubat else 'N/A'
+                
+                if 'conso_chauffage_ep_par_m2' in request.dpe_results:
+                    conso = request.dpe_results.get('conso_chauffage_ep_par_m2')
+                    building_info['conso_chauffage'] = f"{conso:.1f} kWhEP/m2" if conso else 'N/A'
+                
+                if 'emission_ges_chauffage_par_m2' in request.dpe_results:
+                    ges = request.dpe_results.get('emission_ges_chauffage_par_m2')
+                    building_info['emissions_co2'] = f"{ges:.1f} kgCO2/m2" if ges else 'N/A'
+            
             # Parser la réponse du RAG
             parsed_response = parse_rag_response(texte_complet)
             # Générer le PDF
